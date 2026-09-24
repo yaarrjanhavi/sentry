@@ -109,7 +109,7 @@ export const CategoryWeightBars: React.FC<CategoryWeightBarsProps> = ({
             onClick={onOpenExplainTaste}
             className="mt-3 text-xs text-[#a855f7] hover:text-white flex items-center gap-1 font-medium transition-colors"
           >
-            <span>Ask agent: "Explain my taste"</span>
+            <span>Ask agent: &ldquo;Explain my taste&rdquo;</span>
             <span>&rarr;</span>
           </button>
         )}
