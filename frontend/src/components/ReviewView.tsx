@@ -241,7 +241,7 @@ export const ReviewView: React.FC<ReviewViewProps> = ({
                     {line}
                   </span>
 
-                  {isFlagged && (
+                  {lineFlag && (
                     <span 
                       className={`ml-2 px-1.5 py-0.2 rounded text-[10px] shrink-0 uppercase font-bold tracking-wider ${
                         lineFlag.category === 'security' ? 'bg-[#a855f7] text-white' :
