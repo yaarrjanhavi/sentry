@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sentry — Dashboard First</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Teko:wght@500;600;700&family=Urbanist:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#000; --text:#fff; --primary:#3dff6b; --accent:#a855f7; --surface:#1a1a1a; --border:#262626; --muted:#8f8f8f;
+    box-sizing:border-box; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px); }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:'Urbanist',sans-serif; }
+  h1,h2,h3,.brand,.big-stat { font-family:'Teko',sans-serif; font-weight:600; }
+  header { display:flex; justify-content:space-between; align-items:center; padding:20px 36px; border-bottom:1px solid var(--border); }
+  .brand { font-size:30px; }
+  .brand span { color:var(--primary); }
+  nav a { color:var(--muted); text-decoration:none; font-size:14px; margin-left:26px; transition:color .2s; }
+  nav a.active, nav a:hover { color:var(--text); }
+
+  .hero { padding: 40px 36px 10px; }
+  .stat-grid { display:grid; grid-template-columns: repeat(4,1fr); gap:16px; margin-top:20px; }
+  @media (max-width:900px){ .stat-grid{grid-template-columns:repeat(2,1fr);} }
+  .stat-card { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:20px;
+    opacity:0; transform:translateY(10px); animation:rise .4s ease-out forwards; }
+  .stat-card:nth-child(1){animation-delay:.05s}.stat-card:nth-child(2){animation-delay:.12s}
+  .stat-card:nth-child(3){animation-delay:.19s}.stat-card:nth-child(4){animation-delay:.26s}
+  @keyframes rise{to{opacity:1;transform:none;}}
+  .stat-label { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; }
+  .big-stat { font-size:46px; line-height:1; margin-top:6px; }
+  .big-stat.green{color:var(--primary);} .big-stat.purple{color:var(--accent);}
+  .trend { font-size:12px; color:var(--primary); margin-top:4px; }
+
+  .main { display:grid; grid-template-columns: 1.4fr 1fr; gap:20px; padding: 28px 36px 40px; }
+  @media (max-width:900px){ .main{grid-template-columns:1fr;} }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:22px; }
+  .card h3 { font-size:22px; margin:0 0 16px; font-weight:600; letter-spacing:.3px; }
+
+  svg#curve2 path.line { stroke-dasharray:420; stroke-dashoffset:420; animation:draw 1.2s ease-out forwards .2s; }
+  @keyframes draw{to{stroke-dashoffset:0;}}
+
+  .queue-item { display:flex; justify-content:space-between; align-items:center; padding:12px 0; border-bottom:1px solid var(--border); }
+  .queue-item:last-child { border-bottom:none; }
+  .qi-left { display:flex; align-items:center; gap:12px; }
+  .qi-dot { width:8px; height:8px; border-radius:50%; }
+  .qi-dot.security{background:var(--accent);} .qi-dot.complexity{background:var(--primary);} .qi-dot.style{background:#666;}
+  .qi-text { font-size:14px; }
+  .qi-file { font-size:12px; color:var(--muted); }
+  .qi-actions button { background:transparent; border:1px solid var(--border); color:var(--muted); border-radius:7px; padding:5px 10px; font-size:12px; margin-left:6px; cursor:pointer; transition:.18s ease-out; }
+  .qi-actions button:hover.a { }
+  .qi-actions button.accept:hover { background:var(--primary); color:#000; border-color:var(--primary); }
+  .qi-actions button.dismiss:hover { background:rgba(255,255,255,.08); }
+
+  .weight-row { display:flex; align-items:center; gap:10px; margin-bottom:14px; font-size:13px; }
+  .weight-track { flex:1; height:9px; background:#0f0f0f; border-radius:6px; overflow:hidden; }
+  .weight-fill { height:100%; border-radius:6px; transform-origin:left; animation:grow 1s ease-out forwards; }
+  @keyframes grow{from{transform:scaleX(0);}to{transform:scaleX(1);}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">Sentry<span>.</span></div>
+  <nav><a class="active">Dashboard</a><a>Review</a><a>Repos</a><a>Settings</a></nav>
+</header>
+
+<div class="hero">
+  <div class="stat-grid">
+    <div class="stat-card"><div class="stat-label">Acceptance rate</div><div class="big-stat green">78%</div><div class="trend">↑ 34% since round 1</div></div>
+    <div class="stat-card"><div class="stat-label">Flags this week</div><div class="big-stat">142</div><div class="trend" style="color:var(--muted)">across 9 PRs</div></div>
+    <div class="stat-card"><div class="stat-label">Top category</div><div class="big-stat purple">Security</div><div class="trend" style="color:var(--accent)">88% weight</div></div>
+    <div class="stat-card"><div class="stat-label">Repos learning</div><div class="big-stat">3</div><div class="trend" style="color:var(--muted)">independent profiles</div></div>
+  </div>
+</div>
+
+<div class="main">
+  <div class="card">
+    <h3>Acceptance rate — api-gateway</h3>
+    <svg id="curve2" viewBox="0 0 440 150" width="100%" height="150">
+      <polyline points="0,128 65,118 130,100 195,85 260,58 325,40 390,22 440,15" fill="none" stroke="#222" stroke-width="1"/>
+      <path class="line" d="M0,128 L65,118 L130,100 L195,85 L260,58 L325,40 L390,22 L440,15" fill="none" stroke="#3dff6b" stroke-width="2.5"/>
+    </svg>
+    <h3 style="margin-top:26px;">Review queue</h3>
+    <div class="queue-item">
+      <div class="qi-left"><span class="qi-dot security"></span><div><div class="qi-text">Hardcoded secret key in session.py</div><div class="qi-file">src/auth/session.py · line 3</div></div></div>
+      <div class="qi-actions"><button class="accept">Accept</button><button class="dismiss">Dismiss</button></div>
+    </div>
+    <div class="queue-item">
+      <div class="qi-left"><span class="qi-dot complexity"></span><div><div class="qi-text">Redundant boolean condition</div><div class="qi-file">src/utils/validate.py · line 6</div></div></div>
+      <div class="qi-actions"><button class="accept">Accept</button><button class="dismiss">Dismiss</button></div>
+    </div>
+    <div class="queue-item">
+      <div class="qi-left"><span class="qi-dot style"></span><div><div class="qi-text">Ambiguous function name</div><div class="qi-file">src/utils/validate.py · line 6</div></div></div>
+      <div class="qi-actions"><button class="accept">Accept</button><button class="dismiss">Dismiss</button></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Category weights</h3>
+    <div class="weight-row"><span style="width:76px;color:var(--muted)">Security</span><div class="weight-track"><div class="weight-fill" style="width:88%;background:var(--accent);"></div></div><span style="width:30px;text-align:right">88%</span></div>
+    <div class="weight-row"><span style="width:76px;color:var(--muted)">Complexity</span><div class="weight-track"><div class="weight-fill" style="width:64%;background:var(--primary);"></div></div><span style="width:30px;text-align:right">64%</span></div>
+    <div class="weight-row"><span style="width:76px;color:var(--muted)">Duplication</span><div class="weight-track"><div class="weight-fill" style="width:41%;background:#888;"></div></div><span style="width:30px;text-align:right">41%</span></div>
+    <div class="weight-row"><span style="width:76px;color:var(--muted)">Style</span><div class="weight-track"><div class="weight-fill" style="width:22%;background:#555;"></div></div><span style="width:30px;text-align:right">22%</span></div>
+    <p style="font-size:13px;color:var(--muted);line-height:1.6;margin-top:18px;">This repo has learned to prioritize <span style="color:var(--accent)">security</span> and <span style="color:var(--primary)">complexity</span> issues — style nits are surfaced rarely.</p>
+  </div>
+</div>
+</body>
+</html>

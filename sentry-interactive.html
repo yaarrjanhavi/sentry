@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sentry — Self-Learning Code Review Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Teko:wght@500;600;700&family=Urbanist:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { 
+    --bg:#000000; 
+    --text:#ffffff; 
+    --primary:#3dff6b; 
+    --accent:#a855f7; 
+    --surface:#1a1a1a; 
+    --border:#262626; 
+    --muted:#8f8f8f;
+    box-sizing:border-box; 
+    padding-top:env(safe-area-inset-top,0px); 
+    padding-bottom:env(safe-area-inset-bottom,0px); 
+  }
+  * { box-sizing:border-box; }
+  body { 
+    margin:0; 
+    background:var(--bg); 
+    color:var(--text); 
+    font-family:'Urbanist',sans-serif; 
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+  }
+  h1,h2,h3,.brand,.big-stat { font-family:'Teko',sans-serif; font-weight:600; }
+  header { 
+    display:flex; 
+    justify-content:space-between; 
+    align-items:center; 
+    padding:20px 36px; 
+    border-bottom:1px solid var(--border);
+    background:rgba(0,0,0,0.9);
+    position:sticky;
+    top:0;
+    z-index:40;
+    backdrop-filter:blur(8px);
+  }
+  .brand { font-size:32px; cursor:pointer; }
+  .brand span { color:var(--primary); }
+  nav a { 
+    color:var(--muted); 
+    text-decoration:none; 
+    font-size:14px; 
+    margin-left:26px; 
+    transition:color .2s; 
+    cursor:pointer;
+    padding-bottom:3px;
+  }
+  nav a.active, nav a:hover { color:var(--text); }
+  nav a.active { border-bottom:2px solid var(--primary); }
+
+  .hero { padding: 30px 36px 10px; }
+  .stat-grid { display:grid; grid-template-columns: repeat(4,1fr); gap:16px; margin-top:16px; }
+  @media (max-width:900px){ .stat-grid{grid-template-columns:repeat(2,1fr);} }
+  .stat-card { 
+    background:var(--surface); 
+    border:1px solid var(--border); 
+    border-radius:16px; 
+    padding:20px;
+    opacity:0; 
+    transform:translateY(10px); 
+    animation:rise .4s ease-out forwards; 
+    transition:border-color .2s, box-shadow .2s;
+  }
+  .stat-card:hover { border-color:#333; }
+  .stat-card:nth-child(1){animation-delay:.05s}.stat-card:nth-child(2){animation-delay:.12s}
+  .stat-card:nth-child(3){animation-delay:.19s}.stat-card:nth-child(4){animation-delay:.26s}
+  @keyframes rise{to{opacity:1;transform:none;}}
+  .stat-label { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; }
+  .big-stat { font-size:46px; line-height:1; margin-top:6px; }
+  .big-stat.green{color:var(--primary);} .big-stat.purple{color:var(--accent);}
+  .trend { font-size:12px; color:var(--primary); margin-top:4px; font-family:monospace; }
+
+  .main { display:grid; grid-template-columns: 1.4fr 1fr; gap:20px; padding: 24px 36px 40px; flex:1; }
+  @media (max-width:900px){ .main{grid-template-columns:1fr;} }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:22px; }
+  .card h3 { font-size:24px; margin:0 0 16px; font-weight:600; letter-spacing:.3px; }
+
+  svg#curve2 path.line { 
+    stroke-dasharray:600; 
+    stroke-dashoffset:600; 
+    animation:draw 1.2s ease-out forwards .2s; 
+  }
+  @keyframes draw{to{stroke-dashoffset:0;}}
+
+  .queue-item { 
+    display:flex; 
+    justify-content:space-between; 
+    align-items:center; 
+    padding:13px 0; 
+    border-bottom:1px solid var(--border); 
+    transition:all .25s ease-out;
+  }
+  .queue-item:last-child { border-bottom:none; }
+  .queue-item.pulse-accept {
+    background:rgba(61,255,107,0.12);
+    border-left:3px solid var(--primary);
+    padding-left:10px;
+  }
+  .queue-item.fade-dismiss {
+    opacity:0;
+    transform:scale(0.96) translateX(10px);
+  }
+  .qi-left { display:flex; align-items:center; gap:12px; }
+  .qi-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .qi-dot.security{background:var(--accent);} 
+  .qi-dot.complexity{background:var(--primary);} 
+  .qi-dot.style{background:#666;}
+  .qi-dot.best-practice{background:#c084fc;}
+  .qi-dot.duplication{background:#888;}
+  .qi-text { font-size:14px; font-weight:500; }
+  .qi-file { font-size:12px; color:var(--muted); font-family:monospace; margin-top:2px; }
+  
+  .qi-actions button { 
+    background:transparent; 
+    border:1px solid var(--border); 
+    color:var(--muted); 
+    border-radius:7px; 
+    padding:6px 12px; 
+    font-size:12px; 
+    margin-left:6px; 
+    cursor:pointer; 
+    transition:.18s ease-out; 
+    font-weight:600;
+  }
+  .qi-actions button.accept:hover { 
+    background:var(--primary); 
+    color:#000; 
+    border-color:var(--primary); 
+    box-shadow:0 0 12px rgba(61,255,107,0.4); 
+  }
+  .qi-actions button.dismiss:hover { 
+    background:rgba(255,255,255,.08); 
+    color:#fff; 
+  }
+
+  .weight-row { display:flex; align-items:center; gap:10px; margin-bottom:15px; font-size:13px; }
+  .weight-track { flex:1; height:9px; background:#0f0f0f; border-radius:6px; overflow:hidden; border:1px solid #222; }
+  .weight-fill { 
+    height:100%; 
+    border-radius:6px; 
+    transform-origin:left; 
+    transition:width .3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /* Repo switcher pills */
+  .repo-bar { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
+  .repo-pill {
+    background:transparent;
+    border:1px solid var(--border);
+    color:var(--muted);
+    padding:6px 14px;
+    border-radius:999px;
+    font-size:12px;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    gap:6px;
+    transition:.2s;
+  }
+  .repo-pill.active {
+    background:var(--surface);
+    border-color:var(--primary);
+    color:#fff;
+    box-shadow:0 0 12px rgba(61,255,107,0.25);
+  }
+  .repo-pill:hover:not(.active) {
+    border-color:#444;
+    color:#fff;
+  }
+
+  /* Code diff viewer */
+  .diff-view {
+    font-family:monospace;
+    font-size:12px;
+    background:#080808;
+    border-radius:12px;
+    border:1px solid var(--border);
+    padding:16px;
+    overflow-x:auto;
+    line-height:1.7;
+    max-height:600px;
+  }
+  .diff-line { display:flex; align-items:center; padding:1px 6px; border-radius:4px; }
+  .diff-line.add { background:rgba(61,255,107,0.08); color:#3dff6b; border-left:2px solid #3dff6b; }
+  .diff-line.del { background:rgba(239,68,68,0.08); color:#ef4444; border-left:2px solid #ef4444; }
+  .diff-line.flagged { background:rgba(168,85,247,0.12); box-shadow:inset 0 0 0 1px rgba(168,85,247,0.4); }
+
+  /* Modal */
+  .modal-backdrop {
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,0.85);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    z-index:50;
+    backdrop-filter:blur(6px);
+  }
+  .modal-box {
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:16px;
+    width:90%;
+    max-width:640px;
+    padding:26px;
+    animation:rise .3s ease-out;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand" onclick="switchTab('dashboard')">Sentry<span>.</span></div>
+  <nav>
+    <a id="nav-dashboard" class="active" onclick="switchTab('dashboard')">Dashboard</a>
+    <a id="nav-review" onclick="switchTab('review')">Review</a>
+    <a id="nav-repos" onclick="switchTab('repos')">Repos</a>
+    <a id="nav-settings" onclick="switchTab('settings')">Settings</a>
+  </nav>
+</header>
+
+<!-- ================= DASHBOARD VIEW ================= -->
+<div id="view-dashboard">
+  <div class="hero">
+    <div class="repo-bar">
+      <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-right:6px">Active Repo:</span>
+      <button class="repo-pill active" id="btn-repo-api" onclick="selectRepo('api-gateway')">
+        <span style="width:6px;height:6px;border-radius:50%;background:var(--primary)"></span>
+        api-gateway (Backend)
+      </button>
+      <button class="repo-pill" id="btn-repo-ds" onclick="selectRepo('design-system')">
+        <span style="width:6px;height:6px;border-radius:50%;background:var(--accent)"></span>
+        design-system (UI)
+      </button>
+      <button class="repo-pill" id="btn-repo-pay" onclick="selectRepo('payment-service')">
+        <span style="width:6px;height:6px;border-radius:50%;background:#888"></span>
+        payment-service (Cold Start)
+      </button>
+    </div>
+
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-label">Acceptance rate</div>
+        <div class="big-stat green" id="stat-rate">78%</div>
+        <div class="trend" id="stat-trend">↑ 34% since round 1</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Flags this week</div>
+        <div class="big-stat" id="stat-flags">142</div>
+        <div class="trend" style="color:var(--muted)">across 9 PRs</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Top category</div>
+        <div class="big-stat purple" id="stat-top-cat">Security</div>
+        <div class="trend" style="color:var(--accent)" id="stat-top-weight">88% weight</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Repos learning</div>
+        <div class="big-stat">3</div>
+        <div class="trend" style="color:var(--muted)">independent profiles</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h3 id="chart-title">Acceptance rate — api-gateway</h3>
+        <span style="font-size:11px;font-family:monospace;color:var(--primary);background:rgba(61,255,107,0.1);padding:3px 8px;border-radius:6px;border:1px solid rgba(61,255,107,0.2)">
+          Upward Trajectory
+        </span>
+      </div>
+
+      <svg id="curve2" viewBox="0 0 440 150" width="100%" height="150">
+        <defs>
+          <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#3dff6b" stop-opacity="0.2"/>
+            <stop offset="100%" stop-color="#3dff6b" stop-opacity="0.0"/>
+          </linearGradient>
+        </defs>
+        <line x1="0" y1="35" x2="440" y2="35" stroke="#1c1c1c" stroke-dasharray="3 3"/>
+        <line x1="0" y1="75" x2="440" y2="75" stroke="#1c1c1c" stroke-dasharray="3 3"/>
+        <line x1="0" y1="115" x2="440" y2="115" stroke="#1c1c1c" stroke-dasharray="3 3"/>
+        <path id="curve-area" d="M0,128 L65,118 L130,100 L195,85 L260,58 L325,40 L390,22 L440,15 L440,150 L0,150 Z" fill="url(#areaGrad)"/>
+        <polyline id="curve-poly" points="0,128 65,118 130,100 195,85 260,58 325,40 390,22 440,15" fill="none" stroke="#222" stroke-width="1"/>
+        <path id="curve-path" class="line" d="M0,128 L65,118 L130,100 L195,85 L260,58 L325,40 L390,22 L440,15" fill="none" stroke="#3dff6b" stroke-width="2.5"/>
+      </svg>
+      <div style="display:flex;justify-content:space-between;font-size:10px;font-family:monospace;color:#555;margin-top:2px">
+        <span>Round 1 (Baseline)</span>
+        <span>Round 4</span>
+        <span>Round 8 (Current)</span>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:26px;margin-bottom:10px;">
+        <h3 style="margin:0;">Review queue</h3>
+        <span style="font-size:12px;font-family:monospace;color:var(--muted)" id="queue-count">3 items</span>
+      </div>
+
+      <div id="queue-container">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+
+    <div class="card" style="display:flex;flex-direction:column;justify-content:space-between;">
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+          <h3 style="margin:0;">Category weights</h3>
+          <span style="font-size:10px;font-family:monospace;color:var(--muted);text-transform:uppercase">Bayesian Posterior</span>
+        </div>
+
+        <div id="weights-container">
+          <!-- Rendered dynamically -->
+        </div>
+      </div>
+
+      <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:16px;">
+        <p id="taste-summary" style="font-size:13px;color:var(--muted);line-height:1.6;margin:0;">
+          This repo has learned to prioritize <span style="color:var(--accent)">security</span> and <span style="color:var(--primary)">complexity</span> issues — style nits are surfaced rarely.
+        </p>
+
+        <button onclick="openExplainTaste()" style="background:transparent;border:none;color:var(--accent);font-size:12px;cursor:pointer;margin-top:12px;padding:0;display:flex;align-items:center;gap:4px;font-weight:600">
+          <span>Ask agent: "Explain my taste"</span> &rarr;
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= REVIEW VIEW ================= -->
+<div id="view-review" style="display:none;padding:24px 36px 40px;">
+  <div class="card" style="margin-bottom:20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+    <div>
+      <h3 style="margin:0 0 4px;">Code Review Interface</h3>
+      <p style="font-size:12px;color:var(--muted);margin:0;">GitHub-PR-style diff view with inline agent annotations and instant Bayesian feedback.</p>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <select id="diff-selector" onchange="loadDiffPreset(this.value)" style="background:#000;border:1px solid var(--border);color:#fff;padding:6px 12px;border-radius:8px;font-size:12px;">
+        <option value="auth">Sample PR #342: Auth & Session Token</option>
+        <option value="ui">Sample PR #119: UI Button & Tokens</option>
+        <option value="worker">Sample PR #82: Ingest Worker & Leaks</option>
+      </select>
+      <button onclick="triggerReview()" style="background:var(--primary);color:#000;border:none;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">
+        Re-Analyze Diff
+      </button>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:20px;">
+    <!-- Left: Diff -->
+    <div class="card" style="padding:16px;">
+      <div style="display:flex;justify-content:space-between;font-size:11px;font-family:monospace;color:var(--muted);border-bottom:1px solid var(--border);padding-bottom:10px;margin-bottom:12px;">
+        <span>src/auth/session.py</span>
+        <span>Unified Git Diff</span>
+      </div>
+      <div class="diff-view" id="diff-box">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+
+    <!-- Right: Comments -->
+    <div style="display:flex;flex-direction:column;gap:14px;">
+      <div style="font-size:12px;color:var(--muted);font-family:monospace;display:flex;justify-content:space-between;align-items:center;">
+        <span id="review-flags-count">Flags detected: 3</span>
+        <span style="color:var(--primary)">Suppression Filter: Active</span>
+      </div>
+      <div id="review-cards-box" style="display:flex;flex-direction:column;gap:12px;">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= REPOS VIEW ================= -->
+<div id="view-repos" style="display:none;padding:24px 36px 40px;">
+  <div class="card" style="margin-bottom:20px;">
+    <h3 style="margin:0 0 6px;">Repo Profile Comparison</h3>
+    <p style="font-size:12px;color:var(--muted);margin:0;">Compare how different repos converge toward distinct learned tastes.</p>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px;" id="repos-grid">
+    <!-- Rendered dynamically -->
+  </div>
+</div>
+
+<!-- ================= SETTINGS VIEW ================= -->
+<div id="view-settings" style="display:none;padding:24px 36px 40px;max-width:800px;margin:0 auto;">
+  <div class="card">
+    <h3>Engine Configuration</h3>
+    <div style="margin-bottom:16px;">
+      <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;">Google Gemini API Key</label>
+      <input type="password" placeholder="AIzaSy..." style="width:100%;background:#000;border:1px solid var(--border);color:#fff;padding:8px 12px;border-radius:8px;font-size:12px;font-family:monospace;">
+    </div>
+    <div style="margin-bottom:16px;">
+      <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;">Noise Suppression Threshold (Current: 28%)</label>
+      <input type="range" min="10" max="50" value="28" style="width:100%;accent-color:var(--primary);">
+    </div>
+    <div style="border-top:1px solid var(--border);padding-top:16px;">
+      <button style="background:var(--primary);color:#000;border:none;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">
+        Save Changes
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= EXPLAIN TASTE MODAL ================= -->
+<div id="taste-modal" class="modal-backdrop" style="display:none;">
+  <div class="modal-box">
+    <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:16px;">
+      <h3 style="margin:0;font-size:24px;" id="modal-repo-name">Agent Taste — api-gateway</h3>
+      <button onclick="closeExplainTaste()" style="background:transparent;border:none;color:var(--muted);font-size:22px;cursor:pointer;">&times;</button>
+    </div>
+    <div style="background:#0c0c0c;border:1px solid var(--border);padding:14px;border-radius:12px;margin-bottom:16px;">
+      <div style="font-size:11px;color:var(--accent);text-transform:uppercase;font-weight:700;margin-bottom:4px;">Team Consensus</div>
+      <div style="font-size:16px;font-weight:600;" id="modal-headline">Hardened Backend Profile: High Security & Logic Vigilance</div>
+      <p style="font-size:13px;color:var(--muted);line-height:1.6;margin-top:6px;" id="modal-summary">
+        This repo has learned to prioritize security (88%) and complexity (64%) issues — style nits are surfaced rarely.
+      </p>
+    </div>
+    <div style="display:flex;justify-content:flex-end;">
+      <button onclick="closeExplainTaste()" style="background:#262626;color:#fff;border:none;padding:6px 16px;border-radius:8px;font-size:12px;cursor:pointer;">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// Repository state with real Bayesian parameters
+const REPO_DATA = {
+  'api-gateway': {
+    name: 'api-gateway',
+    desc: 'High-throughput API gateway handling authentication & microservice routing.',
+    acceptanceRate: 78,
+    trend: '↑ 34% since round 1',
+    flagsCount: 142,
+    topCat: 'Security',
+    topWeight: 88,
+    weights: [
+      { category: 'Security', weight: 0.88, pct: 88, color: 'var(--accent)', accepts: 22, dismisses: 3 },
+      { category: 'Complexity', weight: 0.64, pct: 64, color: 'var(--primary)', accepts: 16, dismisses: 9 },
+      { category: 'Best-Practice', weight: 0.58, pct: 58, color: '#c084fc', accepts: 14, dismisses: 10 },
+      { category: 'Duplication', weight: 0.41, pct: 41, color: '#888', accepts: 9, dismisses: 13 },
+      { category: 'Style', weight: 0.22, pct: 22, color: '#555', accepts: 4, dismisses: 14 }
+    ],
+    queue: [
+      { id: 'q1', cat: 'security', dotClass: 'security', text: 'Hardcoded secret key in session.py', file: 'src/auth/session.py · line 3', fix: 'SECRET_KEY = os.environ.get("SESSION_KEY")' },
+      { id: 'q2', cat: 'complexity', dotClass: 'complexity', text: 'Redundant boolean condition', file: 'src/utils/validate.py · line 6', fix: 'if is_authenticated and not user.is_suspended:' },
+      { id: 'q3', cat: 'style', dotClass: 'style', text: 'Ambiguous function name', file: 'src/utils/validate.py · line 6', fix: 'def validate_user_session(payload):' }
+    ],
+    history: [44, 50, 58, 65, 71, 74, 76, 78],
+    headline: 'Hardened Backend Profile: High Security & Logic Vigilance',
+    summary: 'This repo has learned to prioritize security (88%) and complexity (64%) issues — style nits are surfaced rarely. The team rejects automated formatting nits, delegating them to linter tools.'
+  },
+  'design-system': {
+    name: 'design-system',
+    desc: 'Shared React component library and token design system.',
+    acceptanceRate: 86,
+    trend: '↑ 48% since round 1',
+    flagsCount: 96,
+    topCat: 'Style',
+    topWeight: 91,
+    weights: [
+      { category: 'Style', weight: 0.91, pct: 91, color: 'var(--primary)', accepts: 29, dismisses: 3 },
+      { category: 'Duplication', weight: 0.82, pct: 82, color: 'var(--accent)', accepts: 23, dismisses: 5 },
+      { category: 'Best-Practice', weight: 0.75, pct: 75, color: '#c084fc', accepts: 18, dismisses: 6 },
+      { category: 'Security', weight: 0.50, pct: 50, color: '#888', accepts: 10, dismisses: 10 },
+      { category: 'Complexity', weight: 0.38, pct: 38, color: '#555', accepts: 8, dismisses: 13 }
+    ],
+    queue: [
+      { id: 'q4', cat: 'style', dotClass: 'complexity', text: 'Raw hex color bypasses theme token contract', file: 'packages/ui/Button.tsx · line 14', fix: 'className="bg-primary text-black"' },
+      { id: 'q5', cat: 'duplication', dotClass: 'security', text: 'Duplicated breakpoint media-query map', file: 'packages/tokens/spacing.ts · line 22', fix: 'export { BREAKPOINTS } from "@sentry-ui/primitives";' }
+    ],
+    history: [38, 49, 61, 70, 77, 84, 86],
+    headline: 'Design System & UI Profile: Strict Consistency & DRY Standards',
+    summary: 'This repo has learned to prioritize style (91%) and duplication (82%) issues — arbitrary styling and copy-pasted CSS tokens are rejected.'
+  },
+  'payment-service': {
+    name: 'payment-service',
+    desc: 'Newly created payment gateway integration. Cold-start baseline.',
+    acceptanceRate: 50,
+    trend: 'Baseline calibrated',
+    flagsCount: 12,
+    topCat: 'Security',
+    topWeight: 80,
+    weights: [
+      { category: 'Security', weight: 0.80, pct: 80, color: 'var(--accent)', accepts: 0, dismisses: 0 },
+      { category: 'Best-Practice', weight: 0.60, pct: 60, color: '#c084fc', accepts: 0, dismisses: 0 },
+      { category: 'Complexity', weight: 0.50, pct: 50, color: 'var(--primary)', accepts: 0, dismisses: 0 },
+      { category: 'Duplication', weight: 0.40, pct: 40, color: '#888', accepts: 0, dismisses: 0 },
+      { category: 'Style', weight: 0.30, pct: 30, color: '#555', accepts: 0, dismisses: 0 }
+    ],
+    queue: [
+      { id: 'q6', cat: 'security', dotClass: 'security', text: 'Stripe webhook missing signature check', file: 'services/webhook.py · line 18', fix: 'stripe.Webhook.construct_event(payload, sig, secret)' }
+    ],
+    history: [50],
+    headline: 'Cold Start Baseline Profile',
+    summary: 'Sentry is operating with baseline heuristics. As you accept or dismiss flags, priorities will dynamically adapt.'
+  }
+};
+
+let currentRepoKey = 'api-gateway';
+
+function renderDashboard() {
+  const repo = REPO_DATA[currentRepoKey];
+  document.getElementById('stat-rate').innerText = repo.acceptanceRate + '%';
+  document.getElementById('stat-trend').innerText = repo.trend;
+  document.getElementById('stat-flags').innerText = repo.flagsCount;
+  document.getElementById('stat-top-cat').innerText = repo.topCat;
+  document.getElementById('stat-top-weight').innerText = repo.topWeight + '% weight';
+  document.getElementById('chart-title').innerText = 'Acceptance rate — ' + repo.name;
+  document.getElementById('taste-summary').innerHTML = repo.summary;
+
+  // Render SVG points dynamically
+  const svg = document.getElementById('curve2');
+  const path = document.getElementById('curve-path');
+  const poly = document.getElementById('curve-poly');
+  const area = document.getElementById('curve-area');
+  const pts = repo.history;
+  const stepX = 440 / Math.max(pts.length - 1, 1);
+  const coords = pts.map((val, idx) => {
+    const x = Math.round(idx * stepX);
+    const y = Math.round(145 - (val / 100) * 130);
+    return `${x},${y}`;
+  });
+  const pathD = 'M' + coords.join(' L');
+  const polyStr = coords.join(' ');
+  const areaD = pathD + ` L440,150 L0,150 Z`;
+
+  poly.setAttribute('points', polyStr);
+  path.setAttribute('d', pathD);
+  area.setAttribute('d', areaD);
+
+  // Render Queue
+  const qContainer = document.getElementById('queue-container');
+  qContainer.innerHTML = '';
+  document.getElementById('queue-count').innerText = repo.queue.length + ' items';
+  
+  if (repo.queue.length === 0) {
+    qContainer.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted);font-size:13px">All flags reviewed! Click Review tab to inspect another diff.</div>';
+  } else {
+    repo.queue.forEach(item => {
+      const div = document.createElement('div');
+      div.className = 'queue-item';
+      div.id = 'qi-' + item.id;
+      div.innerHTML = `
+        <div class="qi-left">
+          <span class="qi-dot ${item.dotClass}"></span>
+          <div>
+            <div class="qi-text">${item.text}</div>
+            <div class="qi-file">${item.file}</div>
+          </div>
+        </div>
+        <div class="qi-actions">
+          <button class="accept" onclick="handleAction('${item.id}', '${item.cat}', 'accept')">Accept</button>
+          <button class="dismiss" onclick="handleAction('${item.id}', '${item.cat}', 'dismiss')">Dismiss</button>
+        </div>
+      `;
+      qContainer.appendChild(div);
+    });
+  }
+
+  // Render Category Weights
+  const wContainer = document.getElementById('weights-container');
+  wContainer.innerHTML = '';
+  repo.weights.forEach(w => {
+    const row = document.createElement('div');
+    row.className = 'weight-row';
+    row.innerHTML = `
+      <span style="width:84px;color:var(--muted);text-transform:capitalize">${w.category}</span>
+      <div class="weight-track">
+        <div class="weight-fill" style="width:${w.pct}%;background:${w.color};"></div>
+      </div>
+      <span style="width:34px;text-align:right;font-family:monospace;font-weight:700">${w.pct}%</span>
+    `;
+    wContainer.appendChild(row);
+  });
+}
+
+function handleAction(itemId, category, action) {
+  const el = document.getElementById('qi-' + itemId);
+  const repo = REPO_DATA[currentRepoKey];
+
+  if (action === 'accept') {
+    if (el) el.classList.add('pulse-accept');
+  } else {
+    if (el) el.classList.add('fade-dismiss');
+  }
+
+  // Update Bayesian weights
+  const catObj = repo.weights.find(w => w.category.toLowerCase() === category.toLowerCase());
+  if (catObj) {
+    if (action === 'accept') {
+      catObj.accepts++;
+      catObj.pct = Math.min(98, catObj.pct + 3);
+      repo.acceptanceRate = Math.min(99, repo.acceptanceRate + 1);
+    } else {
+      catObj.dismisses++;
+      catObj.pct = Math.max(8, catObj.pct - 4);
+      repo.acceptanceRate = Math.max(10, repo.acceptanceRate - 1);
+    }
+  }
+
+  setTimeout(() => {
+    repo.queue = repo.queue.filter(q => q.id !== itemId);
+    renderDashboard();
+  }, 260);
+}
+
+function selectRepo(key) {
+  currentRepoKey = key;
+  document.querySelectorAll('.repo-pill').forEach(b => b.classList.remove('active'));
+  if (key === 'api-gateway') document.getElementById('btn-repo-api').classList.add('active');
+  if (key === 'design-system') document.getElementById('btn-repo-ds').classList.add('active');
+  if (key === 'payment-service') document.getElementById('btn-repo-pay').classList.add('active');
+  renderDashboard();
+}
+
+function switchTab(tab) {
+  ['dashboard', 'review', 'repos', 'settings'].forEach(t => {
+    document.getElementById('view-' + t).style.display = (t === tab) ? 'block' : 'none';
+    const nav = document.getElementById('nav-' + t);
+    if (nav) nav.classList.toggle('active', t === tab);
+  });
+  if (tab === 'review') renderReviewView();
+  if (tab === 'repos') renderReposView();
+}
+
+function renderReviewView() {
+  const diffBox = document.getElementById('diff-box');
+  diffBox.innerHTML = `
+    <div class="diff-line"><span>1</span>&nbsp;&nbsp;import time</div>
+    <div class="diff-line"><span>2</span>&nbsp;&nbsp;import json</div>
+    <div class="diff-line add"><span>3</span>+ # Temporary debug fallback key</div>
+    <div class="diff-line add flagged"><span>4</span>+ SECRET_KEY = "sk_live_984534123_prod_api_master_key"</div>
+    <div class="diff-line"><span>5</span>&nbsp;&nbsp;</div>
+    <div class="diff-line"><span>6</span>&nbsp;&nbsp;def generate_session_token(user_id):</div>
+    <div class="diff-line del"><span>7</span>- &nbsp;&nbsp;&nbsp;&nbsp;return create_jwt(user_id, SECRET_KEY)</div>
+    <div class="diff-line add"><span>8</span>+ &nbsp;&nbsp;&nbsp;&nbsp;claims = {"uid": user_id, "exp": time.time() + 86400}</div>
+    <div class="diff-line add"><span>9</span>+ &nbsp;&nbsp;&nbsp;&nbsp;return encode_jwt(claims, SECRET_KEY)</div>
+  `;
+
+  const cardsBox = document.getElementById('review-cards-box');
+  cardsBox.innerHTML = `
+    <div class="card" style="padding:16px;border-left:3px solid var(--accent)">
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <span style="font-size:10px;font-family:monospace;background:rgba(168,85,247,0.2);color:var(--accent);padding:2px 6px;border-radius:4px;font-weight:700">SECURITY · CRITICAL</span>
+        <span style="font-size:11px;color:var(--muted);font-family:monospace">Line 4</span>
+      </div>
+      <div style="font-size:14px;font-weight:600;margin-bottom:4px">Hardcoded secret key in session.py</div>
+      <p style="font-size:12px;color:var(--muted);line-height:1.5;margin-bottom:10px">
+        Static secret key detected in source code. In production, this allows token forgery.
+      </p>
+      <div style="background:#000;border:1px solid #262626;padding:8px;border-radius:6px;font-family:monospace;font-size:11px;color:#3dff6b;margin-bottom:10px">
+        SECRET_KEY = os.environ.get("APP_SESSION_SECRET")
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:11px;font-family:monospace;color:var(--muted)">Taste weight: 88%</span>
+        <div class="qi-actions">
+          <button class="accept" onclick="alert('Accepted! Bayesian weight incremented.')">Accept</button>
+          <button class="dismiss" onclick="alert('Dismissed! Bayesian weight decremented.')">Dismiss</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderReposView() {
+  const grid = document.getElementById('repos-grid');
+  grid.innerHTML = '';
+  Object.keys(REPO_DATA).forEach(k => {
+    const r = REPO_DATA[k];
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <h3 style="margin:0;">${r.name}</h3>
+        <span style="font-size:10px;font-family:monospace;color:var(--primary);border:1px solid var(--primary);padding:2px 6px;border-radius:4px">
+          ${r.acceptanceRate}% Rate
+        </span>
+      </div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:16px;">${r.desc}</p>
+      <div style="font-size:11px;font-family:monospace;color:var(--muted);margin-bottom:6px;">Top: <strong style="color:#fff">${r.topCat} (${r.topWeight}%)</strong></div>
+      <div style="display:flex;gap:8px;margin-top:14px;">
+        <button onclick="selectRepo('${k}');switchTab('dashboard')" style="background:var(--primary);color:#000;border:none;padding:6px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">
+          View Dashboard
+        </button>
+      </div>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+function openExplainTaste() {
+  const repo = REPO_DATA[currentRepoKey];
+  document.getElementById('modal-repo-name').innerText = 'Agent Taste — ' + repo.name;
+  document.getElementById('modal-headline').innerText = repo.headline;
+  document.getElementById('modal-summary').innerText = repo.summary;
+  document.getElementById('taste-modal').style.display = 'flex';
+}
+
+function closeExplainTaste() {
+  document.getElementById('taste-modal').style.display = 'none';
+}
+
+// Initial Boot
+renderDashboard();
+</script>
+
+</body>
+</html>
