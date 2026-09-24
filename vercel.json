@@ -4,5 +4,11 @@
       "root": "frontend",
       "framework": "nextjs"
     }
-  }
+  },
+  "routes": [
+    {
+      "src": "/(.*)",
+      "service": "frontend"
+    }
+  ]
 }
