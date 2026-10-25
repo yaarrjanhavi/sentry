@@ -35,6 +35,12 @@ class CategoryWeight(BaseModel):
     not_relevant_count: int
     suppressed: bool = False
     color_token: str = "primary"  # 'accent', 'primary', 'muted', etc.
+    ci_lower: float = 0.0
+    ci_upper: float = 1.0
+    ci_percentage_lower: int = 0
+    ci_percentage_upper: int = 100
+    is_cold_start: bool = False
+    total_feedback: int = 0
 
 
 class HistoryPoint(BaseModel):
@@ -61,6 +67,10 @@ class FlagItem(BaseModel):
     confidence: float = 0.85
     suppressed: bool = False
     repo_weight: Optional[int] = None
+    why_shown: Optional[str] = None
+    ci_bounds: Optional[str] = None
+    github_comment_id: Optional[str] = None
+    github_pr_id: Optional[str] = None
     created_at: Optional[str] = None
 
 
@@ -75,6 +85,8 @@ class RepoSummary(BaseModel):
     top_category: str
     top_category_weight: int
     weights: List[CategoryWeight]
+    is_cold_start: bool = False
+    total_reviews_count: int = 0
 
 
 class RepoDetail(RepoSummary):
@@ -96,6 +108,7 @@ class ActionResponse(BaseModel):
     updated_percentage: int
     repo_acceptance_rate: int
     taste_explanation: str
+    why_shown: Optional[str] = None
     weights: List[CategoryWeight]
 
 
@@ -128,3 +141,56 @@ class ExplainTasteResponse(BaseModel):
 class CreateRepoRequest(BaseModel):
     name: str
     description: Optional[str] = ""
+
+
+class BenchmarkRoundResult(BaseModel):
+    round_number: int
+    round_title: str
+    total_flags: int
+    learned_shown: int
+    learned_accepted: int
+    learned_dismissed: int
+    learned_precision: float
+    learned_acceptance_rate: float
+    learned_fpr: float
+    baseline_shown: int
+    baseline_accepted: int
+    baseline_dismissed: int
+    baseline_precision: float
+    baseline_acceptance_rate: float
+    baseline_fpr: float
+
+
+class BenchmarkSummaryResponse(BaseModel):
+    repo_name: str
+    scenario_name: str
+    total_rounds: int
+    total_flags_evaluated: int
+    learned_final_precision: float
+    baseline_final_precision: float
+    precision_gain: float
+    learned_final_fpr: float
+    baseline_final_fpr: float
+    noise_reduction_pct: float
+    rounds: List[BenchmarkRoundResult]
+    category_weights_progression: Dict[str, List[int]]
+
+
+class GitHubWebhookPayload(BaseModel):
+    action: Optional[str] = None
+    pull_request: Optional[Dict[str, Any]] = None
+    repository: Optional[Dict[str, Any]] = None
+    comment: Optional[Dict[str, Any]] = None
+    reaction: Optional[Dict[str, Any]] = None
+    review: Optional[Dict[str, Any]] = None
+    sender: Optional[Dict[str, Any]] = None
+
+
+class GitHubWebhookResponse(BaseModel):
+    status: str
+    event: str
+    action_taken: str
+    flags_generated: int = 0
+    feedback_recorded: Optional[str] = None
+    details: Optional[str] = None
+

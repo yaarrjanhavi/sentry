@@ -38,6 +38,15 @@ COLD_START_PRIORS: Dict[str, Dict[str, float]] = {
 SUPPRESSION_THRESHOLD = 0.28
 
 
+import math
+
+# Cold-start threshold: below 5 feedback events on a category/repo, it is considered cold-start
+COLD_START_MIN_FEEDBACK = 5
+
+# Default time decay factor applied to accumulated evidence during feedback steps (recent feedback matters more)
+TIME_DECAY_FACTOR = 0.96
+
+
 def calculate_weight(alpha: float, beta: float) -> Tuple[float, int]:
     """
     Computes posterior mean weight in [0, 1] and percentage [0, 100].
@@ -51,6 +60,39 @@ def calculate_weight(alpha: float, beta: float) -> Tuple[float, int]:
     weight = max(0.05, min(0.98, weight))
     percentage = int(round(weight * 100))
     return round(weight, 3), percentage
+
+
+def calculate_credible_interval(alpha: float, beta: float, confidence_level: float = 0.90) -> Tuple[float, float, int, int]:
+    """
+    Computes Bayesian Credible Interval for Beta(alpha, beta).
+    Uses Beta distribution variance: Var = (alpha * beta) / ((alpha + beta)^2 * (alpha + beta + 1))
+    For 90% CI: z = 1.645; for 95% CI: z = 1.96.
+    Returns (lower_bound, upper_bound, lower_pct, upper_pct).
+    """
+    total = alpha + beta
+    if total <= 0:
+        return 0.1, 0.9, 10, 90
+
+    mean = alpha / total
+    variance = (alpha * beta) / ((total ** 2) * (total + 1))
+    std_dev = math.sqrt(max(1e-6, variance))
+
+    # Z-multiplier for chosen confidence level
+    z = 1.96 if confidence_level >= 0.95 else 1.645
+    margin = z * std_dev
+
+    lower = max(0.02, min(0.95, mean - margin))
+    upper = max(lower + 0.02, min(0.98, mean + margin))
+
+    lower_pct = int(round(lower * 100))
+    upper_pct = int(round(upper * 100))
+
+    return round(lower, 3), round(upper, 3), lower_pct, upper_pct
+
+
+def is_cold_start_category(accept_count: int, dismiss_count: int, not_relevant_count: int = 0) -> bool:
+    """Returns True if feedback volume is below cold start threshold"""
+    return (accept_count + dismiss_count + not_relevant_count) < COLD_START_MIN_FEEDBACK
 
 
 def get_color_token(category: str) -> str:
@@ -68,16 +110,35 @@ def get_color_token(category: str) -> str:
 def update_bayesian_weight(
     current_alpha: float,
     current_beta: float,
-    action: str
+    action: str,
+    prior_alpha: float = 5.0,
+    prior_beta: float = 5.0,
+    apply_decay: bool = True,
+    decay_factor: float = TIME_DECAY_FACTOR
 ) -> Tuple[float, float, float, int]:
     """
-    Updates the Beta distribution parameters based on user action:
+    Updates Beta distribution parameters with optional time decay:
     - 'accept': adds weight to alpha (evidence that team cares about this issue)
     - 'dismiss': adds weight to beta (evidence that team considers this noise)
     - 'not_relevant': adds heavier weight to beta (+1.5, strong noise signal)
+
+    Time decay: Decays existing accumulated empirical evidence (alpha - prior_alpha)
+    by decay_factor before adding new feedback, ensuring recent team actions weigh more.
     """
-    alpha = current_alpha
-    beta = current_beta
+    if apply_decay:
+        # Separate empirical evidence from baseline prior
+        empirical_alpha = max(0.0, current_alpha - prior_alpha)
+        empirical_beta = max(0.0, current_beta - prior_beta)
+
+        # Decay previous empirical feedback
+        decayed_alpha = empirical_alpha * decay_factor
+        decayed_beta = empirical_beta * decay_factor
+
+        alpha = prior_alpha + decayed_alpha
+        beta = prior_beta + decayed_beta
+    else:
+        alpha = current_alpha
+        beta = current_beta
 
     if action == "accept":
         alpha += 1.0
@@ -86,11 +147,10 @@ def update_bayesian_weight(
     elif action == "not_relevant":
         beta += 1.5
     else:
-        # Fallback
         beta += 0.5
 
     weight, percentage = calculate_weight(alpha, beta)
-    return alpha, beta, weight, percentage
+    return round(alpha, 3), round(beta, 3), weight, percentage
 
 
 def should_suppress_flag(category_weight: float, severity: str) -> bool:
@@ -101,6 +161,55 @@ def should_suppress_flag(category_weight: float, severity: str) -> bool:
     if severity == "critical":
         return False
     return category_weight < SUPPRESSION_THRESHOLD
+
+
+def generate_why_shown_explanation(
+    category: str,
+    weight: float,
+    percentage: int,
+    accept_count: int,
+    dismiss_count: int,
+    severity: str,
+    is_suppressed: bool,
+    ci_lower_pct: int = 0,
+    ci_upper_pct: int = 100,
+    is_cold_start: bool = False
+) -> str:
+    """
+    Generates 'Why was this shown?' transparency explainer.
+    Example: 'Security weight 0.88 for this repo, accepted 14 of 16 similar flags'
+    """
+    cat_title = category.capitalize()
+    total_reviewed = accept_count + dismiss_count
+
+    if severity == "critical":
+        if is_suppressed:
+            return (
+                f"Critical override: {cat_title} weight is {percentage}% (below threshold), "
+                f"but critical security/reliability defects are always surfaced."
+            )
+        return (
+            f"High priority: {cat_title} weight {weight:.2f} ({percentage}%), "
+            f"accepted {accept_count} of {total_reviewed or 1} similar flags."
+        )
+
+    if is_cold_start:
+        return (
+            f"Cold-start calibration: {cat_title} initialized with Bayesian prior ({percentage}%, 90% CI: [{ci_lower_pct}%-{ci_upper_pct}%]). "
+            f"Team has {accept_count} accepts on record."
+        )
+
+    if is_suppressed:
+        return (
+            f"Suppressed: {cat_title} weight {weight:.2f} ({percentage}%) fell below "
+            f"{int(SUPPRESSION_THRESHOLD * 100)}% suppression threshold after {dismiss_count} dismissals."
+        )
+
+    accept_rate = int(round((accept_count / total_reviewed) * 100)) if total_reviewed > 0 else percentage
+    return (
+        f"{cat_title} weight {weight:.2f} for this repo (90% CI: [{ci_lower_pct}%-{ci_upper_pct}%]), "
+        f"accepted {accept_count} of {total_reviewed} similar flags ({accept_rate}% accept rate)."
+    )
 
 
 def generate_taste_explanation(repo_name: str, weights_data: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -178,7 +287,10 @@ def generate_taste_explanation(repo_name: str, weights_data: List[Dict[str, Any]
                 "weight": w["weight"],
                 "accepts": w.get("accept_count", 0),
                 "dismisses": w.get("dismiss_count", 0),
-                "is_suppressed": w["weight"] < SUPPRESSION_THRESHOLD
+                "is_suppressed": w["weight"] < SUPPRESSION_THRESHOLD,
+                "ci_lower": w.get("ci_percentage_lower", 0),
+                "ci_upper": w.get("ci_percentage_upper", 100),
+                "is_cold_start": is_cold_start_category(w.get("accept_count", 0), w.get("dismiss_count", 0))
             }
             for w in sorted_weights
         ],

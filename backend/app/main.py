@@ -1,7 +1,7 @@
 import os
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
@@ -20,14 +20,21 @@ from app.database import (
     get_flag_by_id,
     update_flag_status,
     insert_flags,
-    create_round
+    create_round,
+    record_feedback_event,
+    record_github_event,
+    get_github_events
 )
 from app.learning import (
     COLD_START_PRIORS,
     calculate_weight,
     update_bayesian_weight,
     generate_taste_explanation,
-    get_color_token
+    get_color_token,
+    calculate_credible_interval,
+    is_cold_start_category,
+    generate_why_shown_explanation,
+    TIME_DECAY_FACTOR
 )
 from app.analyzer import (
     parse_diff,
@@ -47,7 +54,15 @@ from app.models import (
     ReviewRequest,
     ReviewResponse,
     ExplainTasteResponse,
-    CreateRepoRequest
+    CreateRepoRequest,
+    BenchmarkSummaryResponse,
+    GitHubWebhookResponse
+)
+from app.benchmark import run_benchmark_replay
+from app.github_integration import (
+    verify_github_signature,
+    handle_github_pull_request_event,
+    handle_github_feedback_event
 )
 
 
@@ -62,7 +77,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Sentry — Self-Learning Code Review Agent API",
     description="Adaptive code review agent that updates category weights based on human accept/dismiss feedback.",
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan
 )
 
@@ -82,17 +97,39 @@ def format_weights(raw_weights: List[Dict[str, Any]]) -> List[CategoryWeight]:
         cat = w["category"]
         weight_val = w["weight"]
         pct = w["percentage"]
+        alpha = w["alpha"]
+        beta = w["beta"]
+        accepts = w["accept_count"]
+        dismisses = w["dismiss_count"]
+        not_relevant = w["not_relevant_count"]
+
+        ci_l = w.get("ci_lower")
+        ci_u = w.get("ci_upper")
+        ci_lp = w.get("ci_percentage_lower")
+        ci_up = w.get("ci_percentage_upper")
+
+        if ci_l is None or ci_u is None or ci_lp == 0 and ci_up == 100:
+            ci_l, ci_u, ci_lp, ci_up = calculate_credible_interval(alpha, beta)
+
+        is_cold = bool(w.get("is_cold_start")) or is_cold_start_category(accepts, dismisses, not_relevant)
+
         result.append(CategoryWeight(
             category=cat,
             weight=weight_val,
             percentage=pct,
-            alpha=w["alpha"],
-            beta=w["beta"],
-            accept_count=w["accept_count"],
-            dismiss_count=w["dismiss_count"],
-            not_relevant_count=w["not_relevant_count"],
+            alpha=alpha,
+            beta=beta,
+            accept_count=accepts,
+            dismiss_count=dismisses,
+            not_relevant_count=not_relevant,
             suppressed=(weight_val < 0.28),
-            color_token=get_color_token(cat)
+            color_token=get_color_token(cat),
+            ci_lower=ci_l,
+            ci_upper=ci_u,
+            ci_percentage_lower=ci_lp,
+            ci_percentage_upper=ci_up,
+            is_cold_start=is_cold,
+            total_feedback=accepts + dismisses + not_relevant
         ))
     return sorted(result, key=lambda x: x.weight, reverse=True)
 
@@ -101,9 +138,16 @@ def format_weights(raw_weights: List[Dict[str, Any]]) -> List[CategoryWeight]:
 def root():
     return {
         "service": "Sentry AI Code Review Agent API",
+        "version": "2.0.0",
         "status": "online",
-        "docs_url": "/docs",
-        "design_spec": "Dashboard-first with Bayesian adaptive category weighting"
+        "features": [
+            "Bayesian Beta-Binomial posterior with time decay",
+            "Credible interval uncertainty bounds & cold-start badges",
+            "Why was this shown transparency explainers",
+            "Offline replay benchmark proof engine",
+            "GitHub App & webhook automated PR review feedback loop"
+        ],
+        "docs_url": "/docs"
     }
 
 
@@ -125,6 +169,9 @@ def list_repositories():
         
         top_cat = fmt_weights[0].category.capitalize() if fmt_weights else "General"
         top_weight = fmt_weights[0].percentage if fmt_weights else 50
+
+        total_feedback = sum(w.total_feedback for w in fmt_weights)
+        is_repo_cold = total_feedback < 10
         
         summaries.append(RepoSummary(
             id=r_id,
@@ -136,7 +183,9 @@ def list_repositories():
             flags_this_week=142 if r_id == "api-gateway" else (96 if r_id == "design-system" else 12),
             top_category=top_cat,
             top_category_weight=top_weight,
-            weights=fmt_weights
+            weights=fmt_weights,
+            is_cold_start=is_repo_cold,
+            total_reviews_count=total_feedback
         ))
         
     return summaries
@@ -165,8 +214,27 @@ def get_repository(repo_id: str):
         ) for h in history_raw
     ]
 
-    queue = [
-        FlagItem(
+    queue = []
+    for q in queue_raw:
+        cat = q["category"]
+        w_obj = next((w for w in fmt_weights if w.category == cat), None)
+        pct = w_obj.percentage if w_obj else 50
+        ci_bounds = f"[{w_obj.ci_percentage_lower}% - {w_obj.ci_percentage_upper}%]" if w_obj else "[30% - 70%]"
+        why = q.get("why_shown")
+        if not why and w_obj:
+            why = generate_why_shown_explanation(
+                category=cat,
+                weight=w_obj.weight,
+                percentage=pct,
+                accept_count=w_obj.accept_count,
+                dismiss_count=w_obj.dismiss_count,
+                severity=q["severity"],
+                is_suppressed=bool(q.get("suppressed")),
+                ci_lower_pct=w_obj.ci_percentage_lower,
+                ci_upper_pct=w_obj.ci_percentage_upper,
+                is_cold_start=w_obj.is_cold_start
+            )
+        queue.append(FlagItem(
             id=q["id"],
             repo_id=q["repo_id"],
             round_id=q.get("round_id"),
@@ -180,10 +248,13 @@ def get_repository(repo_id: str):
             status=q["status"],
             confidence=q.get("confidence", 0.85),
             suppressed=bool(q.get("suppressed")),
-            repo_weight=next((w.percentage for w in fmt_weights if w.category == q["category"]), 50),
+            repo_weight=pct,
+            why_shown=why,
+            ci_bounds=ci_bounds,
+            github_comment_id=q.get("github_comment_id"),
+            github_pr_id=q.get("github_pr_id"),
             created_at=q["created_at"]
-        ) for q in queue_raw
-    ]
+        ))
 
     current_rate = history[-1].acceptance_rate if history else 50
     first_rate = history[0].acceptance_rate if history else 50
@@ -192,6 +263,7 @@ def get_repository(repo_id: str):
 
     top_cat = fmt_weights[0].category.capitalize() if fmt_weights else "General"
     top_weight = fmt_weights[0].percentage if fmt_weights else 50
+    total_feedback = sum(w.total_feedback for w in fmt_weights)
 
     return RepoDetail(
         id=r_id,
@@ -205,7 +277,9 @@ def get_repository(repo_id: str):
         top_category_weight=top_weight,
         weights=fmt_weights,
         history=history,
-        queue=queue
+        queue=queue,
+        is_cold_start=(total_feedback < 10),
+        total_reviews_count=total_feedback
     )
 
 
@@ -221,13 +295,19 @@ def create_new_repository(payload: CreateRepoRequest):
     # Cold start baseline weights
     for cat, prior in COLD_START_PRIORS.items():
         w, pct = calculate_weight(prior["alpha"], prior["beta"])
+        ci_l, ci_u, ci_lp, ci_up = calculate_credible_interval(prior["alpha"], prior["beta"])
         set_category_weight(
             r_id, cat, w, pct,
             alpha=prior["alpha"],
             beta=prior["beta"],
             accept_count=0,
             dismiss_count=0,
-            not_relevant_count=0
+            not_relevant_count=0,
+            ci_lower=ci_l,
+            ci_upper=ci_u,
+            ci_percentage_lower=ci_lp,
+            ci_percentage_upper=ci_up,
+            is_cold_start=True
         )
 
     # Initial history point
@@ -246,7 +326,9 @@ def create_new_repository(payload: CreateRepoRequest):
         flags_this_week=0,
         top_category=fmt_weights[0].category.capitalize() if fmt_weights else "Security",
         top_category_weight=fmt_weights[0].percentage if fmt_weights else 80,
-        weights=fmt_weights
+        weights=fmt_weights,
+        is_cold_start=True,
+        total_reviews_count=0
     )
 
 
@@ -268,7 +350,7 @@ def explain_repo_taste(repo_id: str):
 def handle_flag_action(flag_id: str, payload: ActionRequest):
     """
     Core feedback loop: Updates Bayesian weight model immediately on Accept, Dismiss, or Not Relevant.
-    Calculates updated rates, pushes history point, and returns updated weights to trigger UI animation.
+    Calculates updated rates, pushes history point, applies exponential time decay, and returns updated weights.
     """
     action = payload.action.lower()
     if action not in ["accept", "dismiss", "not_relevant"]:
@@ -281,12 +363,14 @@ def handle_flag_action(flag_id: str, payload: ActionRequest):
     repo_id = flag["repo_id"]
     category = flag["category"]
 
-    # 1. Update flag status in DB
+    # 1. Update flag status in DB and log feedback event
     updated_flag = update_flag_status(flag_id, action)
+    record_feedback_event(repo_id, flag_id, category, action)
 
     # 2. Retrieve current category weight record
     weights = get_repo_weights(repo_id)
     cat_record = next((w for w in weights if w["category"] == category), None)
+    prior = COLD_START_PRIORS.get(category, {"alpha": 5.0, "beta": 5.0})
 
     if cat_record:
         cur_alpha = cat_record["alpha"]
@@ -295,7 +379,6 @@ def handle_flag_action(flag_id: str, payload: ActionRequest):
         dismisses = cat_record["dismiss_count"]
         not_relevant = cat_record["not_relevant_count"]
     else:
-        prior = COLD_START_PRIORS.get(category, {"alpha": 5.0, "beta": 5.0})
         cur_alpha, cur_beta = prior["alpha"], prior["beta"]
         accepts, dismisses, not_relevant = 0, 0, 0
 
@@ -306,8 +389,17 @@ def handle_flag_action(flag_id: str, payload: ActionRequest):
     elif action == "not_relevant":
         not_relevant += 1
 
-    # 3. Compute new Bayesian parameters
-    new_alpha, new_beta, new_weight, new_pct = update_bayesian_weight(cur_alpha, cur_beta, action)
+    # 3. Compute new Bayesian parameters with time decay
+    new_alpha, new_beta, new_weight, new_pct = update_bayesian_weight(
+        cur_alpha, cur_beta, action,
+        prior_alpha=prior["alpha"],
+        prior_beta=prior["beta"],
+        apply_decay=True,
+        decay_factor=TIME_DECAY_FACTOR
+    )
+
+    ci_l, ci_u, ci_lp, ci_up = calculate_credible_interval(new_alpha, new_beta)
+    is_cold = is_cold_start_category(accepts, dismisses, not_relevant)
 
     # 4. Save updated weight
     set_category_weight(
@@ -315,7 +407,12 @@ def handle_flag_action(flag_id: str, payload: ActionRequest):
         alpha=new_alpha, beta=new_beta,
         accept_count=accepts,
         dismiss_count=dismisses,
-        not_relevant_count=not_relevant
+        not_relevant_count=not_relevant,
+        ci_lower=ci_l,
+        ci_upper=ci_u,
+        ci_percentage_lower=ci_lp,
+        ci_percentage_upper=ci_up,
+        is_cold_start=is_cold
     )
 
     # 5. Update acceptance rate and append new history point
@@ -335,6 +432,19 @@ def handle_flag_action(flag_id: str, payload: ActionRequest):
     fmt_weights = format_weights(all_weights)
     taste = generate_taste_explanation(repo_id, all_weights)
 
+    why_shown = generate_why_shown_explanation(
+        category=category,
+        weight=new_weight,
+        percentage=new_pct,
+        accept_count=accepts,
+        dismiss_count=dismisses,
+        severity=flag["severity"],
+        is_suppressed=(new_weight < 0.28),
+        ci_lower_pct=ci_lp,
+        ci_upper_pct=ci_up,
+        is_cold_start=is_cold
+    )
+
     return ActionResponse(
         flag_id=flag_id,
         new_status=action,
@@ -344,6 +454,7 @@ def handle_flag_action(flag_id: str, payload: ActionRequest):
         updated_percentage=new_pct,
         repo_acceptance_rate=new_rate,
         taste_explanation=taste["summary"],
+        why_shown=why_shown,
         weights=fmt_weights
     )
 
@@ -356,7 +467,7 @@ async def review_diff(repo_id: str, payload: ReviewRequest):
     2. Runs static analysis
     3. Runs LLM refinement if API key exists
     4. Evaluates flags against repo's learned category weights
-    5. Saves new review round and returns flags
+    5. Saves new review round and returns flags with explainability metadata
     """
     repo = get_repo_by_id(repo_id)
     if not repo:
@@ -397,7 +508,9 @@ async def review_diff(repo_id: str, payload: ReviewRequest):
             status="pending",
             confidence=f.get("confidence", 0.85),
             suppressed=bool(f.get("suppressed")),
-            repo_weight=f.get("repo_weight", 50)
+            repo_weight=f.get("repo_weight", 50),
+            why_shown=f.get("why_shown"),
+            ci_bounds=f.get("ci_bounds")
         )
         for f in enriched_flags
     ]
@@ -423,13 +536,19 @@ def reset_repo(repo_id: str):
 
     for cat, prior in COLD_START_PRIORS.items():
         w, pct = calculate_weight(prior["alpha"], prior["beta"])
+        ci_l, ci_u, ci_lp, ci_up = calculate_credible_interval(prior["alpha"], prior["beta"])
         set_category_weight(
             repo_id, cat, w, pct,
             alpha=prior["alpha"],
             beta=prior["beta"],
             accept_count=0,
             dismiss_count=0,
-            not_relevant_count=0
+            not_relevant_count=0,
+            ci_lower=ci_l,
+            ci_upper=ci_u,
+            ci_percentage_lower=ci_lp,
+            ci_percentage_upper=ci_up,
+            is_cold_start=True
         )
 
     # Reset history
@@ -438,3 +557,94 @@ def reset_repo(repo_id: str):
     fmt_weights = format_weights(weights)
 
     return {"status": "success", "message": f"Repo {repo_id} reset to cold-start defaults", "weights": fmt_weights}
+
+
+# -----------------------------------------------------------------------------
+# Phase 1: Benchmark & Proof Endpoints
+# -----------------------------------------------------------------------------
+
+@app.post("/api/benchmark/replay", response_model=BenchmarkSummaryResponse)
+def execute_benchmark_replay(payload: Optional[Dict[str, Any]] = None):
+    """
+    Learning proof benchmark: runs an offline replay comparing the Bayesian
+    learned model against a static-weights baseline over 10 rounds.
+    """
+    repo = (payload or {}).get("repo_name", "api-gateway")
+    scenario = (payload or {}).get("scenario", "backend_hardened")
+    decay = float((payload or {}).get("decay_factor", TIME_DECAY_FACTOR))
+    return run_benchmark_replay(repo_name=repo, scenario=scenario, decay_factor=decay)
+
+
+# -----------------------------------------------------------------------------
+# Phase 1: GitHub App & Webhook Integration Endpoints
+# -----------------------------------------------------------------------------
+
+@app.post("/api/github/webhook", response_model=GitHubWebhookResponse)
+async def github_webhook_endpoint(
+    request: Request,
+    x_github_event: Optional[str] = Header(None, alias="X-GitHub-Event"),
+    x_hub_signature_256: Optional[str] = Header(None, alias="X-Hub-Signature-256")
+):
+    """
+    GitHub App & OAuth Webhook receiver.
+    Verifies HMAC-SHA256 signature and handles pull_request and reaction/comment events.
+    """
+    body_bytes = await request.body()
+    if not verify_github_signature(body_bytes, x_hub_signature_256):
+        raise HTTPException(status_code=401, detail="Invalid HMAC-SHA256 webhook signature")
+
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    event_name = x_github_event or payload.get("event") or "pull_request"
+
+    if event_name == "pull_request":
+        res = await handle_github_pull_request_event(payload)
+        return GitHubWebhookResponse(
+            status=res.get("status", "success"),
+            event=event_name,
+            action_taken=res.get("action", "reviewed"),
+            flags_generated=res.get("flags_posted", 0),
+            details=f"PR #{res.get('pr_number')} processed. {res.get('flags_posted', 0)} flags posted."
+        )
+    elif event_name in ["pull_request_review_comment", "reaction"]:
+        res = await handle_github_feedback_event(payload, event_name)
+        return GitHubWebhookResponse(
+            status=res.get("status", "success"),
+            event=event_name,
+            action_taken=res.get("action", "feedback_recorded"),
+            feedback_recorded=res.get("summary"),
+            details=res.get("summary")
+        )
+    else:
+        return GitHubWebhookResponse(
+            status="ignored",
+            event=event_name,
+            action_taken="none",
+            details=f"Event '{event_name}' not configured for automatic review."
+        )
+
+
+@app.post("/api/github/simulate")
+async def simulate_github_event(payload: Dict[str, Any]):
+    """
+    Simulates a GitHub PR opened or reaction feedback event for local dev and interactive UI testing.
+    """
+    event_type = payload.get("event_type", "pull_request")
+    if event_type == "pull_request":
+        res = await handle_github_pull_request_event(payload)
+        return res
+    else:
+        res = await handle_github_feedback_event(payload, event_type)
+        return res
+
+
+@app.get("/api/github/events")
+def list_github_events(repo_id: Optional[str] = None, limit: int = 25):
+    """
+    Retrieves recent GitHub App webhook event executions.
+    """
+    return get_github_events(repo_id, limit)
+

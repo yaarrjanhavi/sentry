@@ -8,15 +8,18 @@ import { DashboardView } from '../components/DashboardView';
 import { ReviewView } from '../components/ReviewView';
 import { ReposView } from '../components/ReposView';
 import { SettingsView } from '../components/SettingsView';
+import { BenchmarkView } from '../components/BenchmarkView';
+import { GitHubModal } from '../components/GitHubModal';
 import { ExplainTasteModal } from '../components/ExplainTasteModal';
 
 export default function SentryApp() {
-  const [currentTab, setCurrentTab] = useState<'dashboard' | 'review' | 'repos' | 'settings'>('dashboard');
+  const [currentTab, setCurrentTab] = useState<'dashboard' | 'review' | 'benchmark' | 'repos' | 'settings'>('dashboard');
   const [activeRepoId, setActiveRepoId] = useState<string>('api-gateway');
   const [repos, setRepos] = useState<RepoSummary[]>([]);
   const [repoDetail, setRepoDetail] = useState<RepoDetail | null>(null);
   const [isExplainTasteOpen, setIsExplainTasteOpen] = useState<boolean>(false);
   const [explainTasteRepoId, setExplainTasteRepoId] = useState<string>('api-gateway');
+  const [isGitHubModalOpen, setIsGitHubModalOpen] = useState<boolean>(false);
 
   // Load repos list
   const loadRepos = useCallback(async () => {
@@ -71,6 +74,7 @@ export default function SentryApp() {
         setCurrentTab={setCurrentTab}
         activeRepoId={activeRepoId}
         onOpenExplainTaste={() => handleOpenExplainTaste()}
+        onOpenGitHubModal={() => setIsGitHubModalOpen(true)}
       />
 
       {/* Main Content View Container */}
@@ -94,6 +98,13 @@ export default function SentryApp() {
             onSelectRepo={handleSelectRepo}
             onOpenExplainTaste={() => handleOpenExplainTaste()}
             onFeedbackGiven={handleQueueUpdated}
+          />
+        )}
+
+        {currentTab === 'benchmark' && (
+          <BenchmarkView
+            activeRepoId={activeRepoId}
+            onNavigateToReview={() => setCurrentTab('review')}
           />
         )}
 
@@ -132,6 +143,14 @@ export default function SentryApp() {
         repoId={explainTasteRepoId}
         isOpen={isExplainTasteOpen}
         onClose={() => setIsExplainTasteOpen(false)}
+      />
+
+      {/* GitHub App & Webhook Modal */}
+      <GitHubModal
+        isOpen={isGitHubModalOpen}
+        onClose={() => setIsGitHubModalOpen(false)}
+        activeRepoId={activeRepoId}
+        onFeedbackSync={handleQueueUpdated}
       />
     </div>
   );

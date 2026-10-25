@@ -54,16 +54,35 @@ export const CategoryWeightBars: React.FC<CategoryWeightBarsProps> = ({
             return (
               <div key={item.category} className="group">
                 <div className="flex items-center gap-3 text-xs mb-1">
-                  <div className="w-20 text-[#8f8f8f] capitalize font-medium flex items-center justify-between">
-                    <span>{item.category}</span>
-                    {isSuppressed && (
-                      <span className="text-[9px] text-[#ef4444] px-1 py-0.2 bg-[#ef4444]/10 rounded border border-[#ef4444]/20" title="Low weight: Non-critical flags are suppressed">
-                        Low
-                      </span>
-                    )}
+                  <div className="w-24 text-[#8f8f8f] capitalize font-medium flex items-center justify-between">
+                    <span className="truncate">{item.category}</span>
+                    <div className="flex items-center gap-1">
+                      {item.is_cold_start && (
+                        <span className="text-[8px] text-[#f59e0b] px-1 py-0.2 bg-[#f59e0b]/15 rounded border border-[#f59e0b]/30 uppercase font-mono" title="Cold start prior: fewer than 5 feedback reviews recorded">
+                          Cold
+                        </span>
+                      )}
+                      {isSuppressed && (
+                        <span className="text-[9px] text-[#ef4444] px-1 py-0.2 bg-[#ef4444]/10 rounded border border-[#ef4444]/20" title="Low weight: Non-critical flags are suppressed">
+                          Low
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <div className="flex-1 h-[9px] bg-[#0f0f0f] rounded-md overflow-hidden relative border border-[#1f1f1f]">
+                    {/* 90% Credible Interval Uncertainty Range */}
+                    {item.ci_percentage_lower !== undefined && item.ci_percentage_upper !== undefined && (
+                      <div
+                        className="absolute top-0 bottom-0 opacity-25 rounded"
+                        style={{
+                          left: `${item.ci_percentage_lower}%`,
+                          width: `${Math.max(3, item.ci_percentage_upper - item.ci_percentage_lower)}%`,
+                          backgroundColor: color
+                        }}
+                        title={`90% Credible Interval: [${item.ci_percentage_lower}% - ${item.ci_percentage_upper}%]`}
+                      />
+                    )}
                     <div
                       className="h-full rounded-md transition-all duration-300 ease-out"
                       style={{
@@ -80,10 +99,17 @@ export const CategoryWeightBars: React.FC<CategoryWeightBarsProps> = ({
                   </span>
                 </div>
 
-                {/* Subtext info on hover */}
-                <div className="text-[10px] text-[#666] font-mono pl-24 flex gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <span>Accepts: {item.accept_count}</span>
-                  <span>Dismissals: {item.dismiss_count + item.not_relevant_count}</span>
+                {/* Subtext info on hover with 90% CI */}
+                <div className="text-[10px] text-[#666] font-mono pl-28 flex justify-between items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="flex gap-3">
+                    <span>Accepts: {item.accept_count}</span>
+                    <span>Dismissals: {item.dismiss_count + item.not_relevant_count}</span>
+                  </div>
+                  {item.ci_percentage_lower !== undefined && item.ci_percentage_upper !== undefined && (
+                    <span className="text-[#888]">
+                      90% CI: [{item.ci_percentage_lower}% - {item.ci_percentage_upper}%]
+                    </span>
+                  )}
                 </div>
               </div>
             );

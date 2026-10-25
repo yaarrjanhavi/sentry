@@ -9,7 +9,7 @@ import uuid
 from typing import List, Dict, Any, Optional
 import httpx
 
-from app.learning import should_suppress_flag, get_color_token
+from app.learning import should_suppress_flag, get_color_token, generate_why_shown_explanation, is_cold_start_category
 
 
 def parse_diff(diff_content: str) -> List[Dict[str, Any]]:
@@ -308,9 +308,26 @@ def apply_weights_and_suppression(flags: List[Dict[str, Any]], weights: List[Dic
         w_info = weight_map.get(cat, {})
         weight_val = w_info.get("weight", 0.5)
         percentage = w_info.get("percentage", 50)
-        
+        accepts = w_info.get("accept_count", 0)
+        dismisses = w_info.get("dismiss_count", 0)
+        ci_lower = w_info.get("ci_percentage_lower", max(0, percentage - 15))
+        ci_upper = w_info.get("ci_percentage_upper", min(100, percentage + 15))
+        is_cold = is_cold_start_category(accepts, dismisses)
+
         is_suppressed = should_suppress_flag(weight_val, f["severity"])
-        
+        why_shown = generate_why_shown_explanation(
+            category=cat,
+            weight=weight_val,
+            percentage=percentage,
+            accept_count=accepts,
+            dismiss_count=dismisses,
+            severity=f["severity"],
+            is_suppressed=is_suppressed,
+            ci_lower_pct=ci_lower,
+            ci_upper_pct=ci_upper,
+            is_cold_start=is_cold
+        )
+
         flag_id = f.get("id") or str(uuid.uuid4())
         enriched.append({
             "id": flag_id,
@@ -326,6 +343,8 @@ def apply_weights_and_suppression(flags: List[Dict[str, Any]], weights: List[Dic
             "confidence": f.get("confidence", 0.85),
             "suppressed": is_suppressed,
             "repo_weight": percentage,
+            "why_shown": why_shown,
+            "ci_bounds": f"[{ci_lower}% - {ci_upper}%]",
             "color_token": get_color_token(cat)
         })
 

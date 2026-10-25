@@ -338,6 +338,21 @@ export const ReviewView: React.FC<ReviewViewProps> = ({
                       {flag.explanation}
                     </p>
 
+                    {/* Why was this shown? Transparency Explainer */}
+                    {flag.why_shown && (
+                      <div className="mb-3 px-3 py-2 rounded-xl bg-black/70 border border-[#a855f7]/40 text-xs font-mono flex items-start gap-2.5 shadow-sm">
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#a855f7] mt-1 shrink-0 animate-pulse" />
+                        <div>
+                          <div className="text-[10px] uppercase font-bold text-[#a855f7] tracking-wider mb-0.5">
+                            Why was this shown?
+                          </div>
+                          <div className="text-[#e2e8f0] text-[11px] leading-relaxed">
+                            {flag.why_shown}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Proposed Fix Code Snippet */}
                     {flag.proposed_fix && (
                       <div className="mb-3 rounded-lg bg-black border border-[#262626] p-2.5 font-mono text-[11px] relative group">
@@ -363,6 +378,11 @@ export const ReviewView: React.FC<ReviewViewProps> = ({
                     <div className="flex justify-between items-center pt-2 border-t border-[#262626]">
                       <div className="text-[11px] font-mono text-[#8f8f8f]">
                         Taste weight: <strong className="text-white">{flag.repo_weight}%</strong>
+                        {flag.ci_bounds && (
+                          <span className="text-[#666] ml-1">
+                            (90% CI: [{flag.ci_bounds[0]}% - {flag.ci_bounds[1]}%])
+                          </span>
+                        )}
                       </div>
 
                       {flag.status === 'pending' ? (

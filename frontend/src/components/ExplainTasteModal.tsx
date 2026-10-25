@@ -47,9 +47,16 @@ export const ExplainTasteModal: React.FC<ExplainTasteModalProps> = ({
               </svg>
             </div>
             <div>
-              <h2 className="text-xl font-bold font-teko text-white tracking-wide m-0">
-                Agent Taste Profile — {repoId}
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl font-bold font-teko text-white tracking-wide m-0">
+                  Agent Taste Profile — {repoId}
+                </h2>
+                {data?.is_cold_start && (
+                  <span className="text-[10px] text-[#f59e0b] bg-[#f59e0b]/15 px-2 py-0.5 rounded border border-[#f59e0b]/30 font-mono uppercase">
+                    Cold Start Prior
+                  </span>
+                )}
+              </div>
               <span className="text-[11px] text-[#8f8f8f] font-mono">
                 {data?.confidence_level || 'Computing Bayesian Prior'}
               </span>
@@ -145,13 +152,22 @@ export const ExplainTasteModal: React.FC<ExplainTasteModalProps> = ({
                           <td className="py-2.5 px-3 capitalize font-sans text-white font-medium">
                             {cat.category}
                           </td>
-                          <td className="py-2.5 px-3 text-[#3dff6b] font-bold">
-                            {cat.percentage}%
+                          <td className="py-2.5 px-3">
+                            <span className="text-[#3dff6b] font-bold">{cat.percentage}%</span>
+                            {cat.ci_bounds && (
+                              <span className="text-[#888] text-[10px] block">
+                                90% CI: [{cat.ci_bounds[0]}% - {cat.ci_bounds[1]}%]
+                              </span>
+                            )}
                           </td>
                           <td className="py-2.5 px-3 text-[#8f8f8f]">{cat.accepts}</td>
                           <td className="py-2.5 px-3 text-[#8f8f8f]">{cat.dismisses}</td>
                           <td className="py-2.5 px-3">
-                            {cat.is_suppressed ? (
+                            {cat.is_cold_start ? (
+                              <span className="text-[#f59e0b] bg-[#f59e0b]/10 px-1.5 py-0.5 rounded border border-[#f59e0b]/20 text-[10px]" title="Fewer than 5 feedback reviews recorded">
+                                Cold Start
+                              </span>
+                            ) : cat.is_suppressed ? (
                               <span className="text-[#ef4444] bg-[#ef4444]/10 px-1.5 py-0.5 rounded border border-[#ef4444]/20 text-[10px]">
                                 Filtered
                               </span>

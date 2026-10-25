@@ -79,6 +79,11 @@ export const ReposView: React.FC<ReposViewProps> = ({
                           Active
                         </span>
                       )}
+                      {repo.is_cold_start && (
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-[#f59e0b]/20 text-[#f59e0b] border border-[#f59e0b]/30 font-mono uppercase">
+                          Cold Start
+                        </span>
+                      )}
                     </h3>
                     <p className="text-xs text-[#8f8f8f] mt-1 line-clamp-2 leading-relaxed">
                       {repo.description || 'Configured with adaptive category weighting.'}

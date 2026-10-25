@@ -103,6 +103,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   }`} 
                 />
                 <span>{r.name}</span>
+                {r.is_cold_start && (
+                  <span className="text-[9px] px-1 py-0.2 bg-[#f59e0b]/15 text-[#f59e0b] border border-[#f59e0b]/30 rounded uppercase font-mono">
+                    Cold Start
+                  </span>
+                )}
                 <span className="text-[10px] font-mono text-[#666]">
                   {r.current_acceptance_rate}%
                 </span>
@@ -111,15 +116,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           })}
         </div>
 
-        <button
-          onClick={onNavigateToReview}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#3dff6b] hover:bg-[#32e05d] text-black font-semibold text-xs tracking-wide transition-all shadow-[0_0_16px_rgba(61,255,107,0.25)]"
-        >
-          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <path d="M12 5v14M5 12h14"/>
-          </svg>
-          Review Code Diff
-        </button>
+        <div className="flex items-center gap-3">
+          {repoDetail?.is_cold_start && (
+            <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#f59e0b]/10 border border-[#f59e0b]/30 text-[#f59e0b] text-xs font-mono">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#f59e0b] animate-ping" />
+              <span>Cold Start Mode (&lt;5 reviews)</span>
+            </div>
+          )}
+
+          <button
+            onClick={onNavigateToReview}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#3dff6b] hover:bg-[#32e05d] text-black font-semibold text-xs tracking-wide transition-all shadow-[0_0_16px_rgba(61,255,107,0.25)]"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M12 5v14M5 12h14"/>
+            </svg>
+            Review Code Diff
+          </button>
+        </div>
       </div>
 
       {/* Hero Section: 4 Stat Cards directly from design.html */}
@@ -227,8 +241,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                               </span>
                             )}
                           </div>
-                          <div className="qi-file text-xs text-[#8f8f8f] font-mono mt-0.5">
-                            {flag.file_path} · line {flag.line_number}
+                          <div className="qi-file text-xs text-[#8f8f8f] font-mono mt-0.5 flex flex-wrap items-center gap-2">
+                            <span>{flag.file_path} · line {flag.line_number}</span>
+                            {flag.why_shown && (
+                              <span className="text-[10px] text-[#a855f7] bg-[#a855f7]/10 px-1.5 py-0.2 rounded border border-[#a855f7]/25 truncate max-w-sm" title={flag.why_shown}>
+                                Why shown: {flag.why_shown}
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>

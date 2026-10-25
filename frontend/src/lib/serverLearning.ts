@@ -18,11 +18,11 @@ const GLOBAL_STATE: Record<string, ServerRepoState> = {
     description: 'High-throughput API gateway handling authentication & microservice routing.',
     created_at: new Date().toISOString(),
     weights: [
-      { category: 'security', weight: 0.88, percentage: 88, alpha: 22, beta: 3, accept_count: 22, dismiss_count: 3, not_relevant_count: 0, suppressed: false, color_token: 'accent' },
-      { category: 'complexity', weight: 0.64, percentage: 64, alpha: 16, beta: 9, accept_count: 16, dismiss_count: 9, not_relevant_count: 0, suppressed: false, color_token: 'primary' },
-      { category: 'best-practice', weight: 0.58, percentage: 58, alpha: 14, beta: 10, accept_count: 14, dismiss_count: 10, not_relevant_count: 0, suppressed: false, color_token: 'accent' },
-      { category: 'duplication', weight: 0.41, percentage: 41, alpha: 9, beta: 13, accept_count: 9, dismiss_count: 13, not_relevant_count: 1, suppressed: false, color_token: 'muted' },
-      { category: 'style', weight: 0.22, percentage: 22, alpha: 4, beta: 14, accept_count: 4, dismiss_count: 14, not_relevant_count: 2, suppressed: true, color_token: 'dark-muted' }
+      { category: 'security', weight: 0.88, percentage: 88, alpha: 22, beta: 3, accept_count: 22, dismiss_count: 3, not_relevant_count: 0, suppressed: false, color_token: 'accent', ci_percentage_lower: 81, ci_percentage_upper: 94, is_cold_start: false, total_feedback: 25 },
+      { category: 'complexity', weight: 0.64, percentage: 64, alpha: 16, beta: 9, accept_count: 16, dismiss_count: 9, not_relevant_count: 0, suppressed: false, color_token: 'primary', ci_percentage_lower: 53, ci_percentage_upper: 74, is_cold_start: false, total_feedback: 25 },
+      { category: 'best-practice', weight: 0.58, percentage: 58, alpha: 14, beta: 10, accept_count: 14, dismiss_count: 10, not_relevant_count: 0, suppressed: false, color_token: 'accent', ci_percentage_lower: 47, ci_percentage_upper: 68, is_cold_start: false, total_feedback: 24 },
+      { category: 'duplication', weight: 0.41, percentage: 41, alpha: 9, beta: 13, accept_count: 9, dismiss_count: 13, not_relevant_count: 1, suppressed: false, color_token: 'muted', ci_percentage_lower: 30, ci_percentage_upper: 52, is_cold_start: false, total_feedback: 23 },
+      { category: 'style', weight: 0.22, percentage: 22, alpha: 4, beta: 14, accept_count: 4, dismiss_count: 14, not_relevant_count: 2, suppressed: true, color_token: 'dark-muted', ci_percentage_lower: 12, ci_percentage_upper: 32, is_cold_start: false, total_feedback: 20 }
     ],
     history: [
       { round_number: 1, acceptance_rate: 44, total_flags: 25, accepted_flags: 11, dismissed_flags: 14, created_at: '' },
@@ -48,7 +48,9 @@ const GLOBAL_STATE: Record<string, ServerRepoState> = {
         status: 'pending',
         confidence: 0.99,
         suppressed: false,
-        repo_weight: 88
+        repo_weight: 88,
+        why_shown: 'Critical override: Security weight 0.88 for this repo (90% CI: [81%-94%]), accepted 22 of 25 similar flags.',
+        ci_bounds: '[81% - 94%]'
       },
       {
         id: 'flag-api-2',
@@ -63,7 +65,9 @@ const GLOBAL_STATE: Record<string, ServerRepoState> = {
         status: 'pending',
         confidence: 0.94,
         suppressed: false,
-        repo_weight: 64
+        repo_weight: 64,
+        why_shown: 'Complexity weight 0.64 for this repo (90% CI: [53%-74%]), accepted 16 of 25 similar flags (64% accept rate).',
+        ci_bounds: '[53% - 74%]'
       },
       {
         id: 'flag-api-3',
@@ -78,7 +82,9 @@ const GLOBAL_STATE: Record<string, ServerRepoState> = {
         status: 'pending',
         confidence: 0.88,
         suppressed: false,
-        repo_weight: 22
+        repo_weight: 22,
+        why_shown: 'Style weight 0.22 for this repo (90% CI: [12%-32%]), 14 dismissals vs 4 accepts. Shown in queue for calibration.',
+        ci_bounds: '[12% - 32%]'
       }
     ]
   },
@@ -88,11 +94,11 @@ const GLOBAL_STATE: Record<string, ServerRepoState> = {
     description: 'Shared React component library and token system for web applications.',
     created_at: new Date().toISOString(),
     weights: [
-      { category: 'style', weight: 0.91, percentage: 91, alpha: 29, beta: 3, accept_count: 29, dismiss_count: 3, not_relevant_count: 0, suppressed: false, color_token: 'primary' },
-      { category: 'duplication', weight: 0.82, percentage: 82, alpha: 23, beta: 5, accept_count: 23, dismiss_count: 5, not_relevant_count: 0, suppressed: false, color_token: 'accent' },
-      { category: 'best-practice', weight: 0.75, percentage: 75, alpha: 18, beta: 6, accept_count: 18, dismiss_count: 6, not_relevant_count: 0, suppressed: false, color_token: 'accent' },
-      { category: 'security', weight: 0.50, percentage: 50, alpha: 10, beta: 10, accept_count: 10, dismiss_count: 10, not_relevant_count: 0, suppressed: false, color_token: 'muted' },
-      { category: 'complexity', weight: 0.38, percentage: 38, alpha: 8, beta: 13, accept_count: 8, dismiss_count: 13, not_relevant_count: 1, suppressed: false, color_token: 'dark-muted' }
+      { category: 'style', weight: 0.91, percentage: 91, alpha: 29, beta: 3, accept_count: 29, dismiss_count: 3, not_relevant_count: 0, suppressed: false, color_token: 'primary', ci_percentage_lower: 84, ci_percentage_upper: 97, is_cold_start: false, total_feedback: 32 },
+      { category: 'duplication', weight: 0.82, percentage: 82, alpha: 23, beta: 5, accept_count: 23, dismiss_count: 5, not_relevant_count: 0, suppressed: false, color_token: 'accent', ci_percentage_lower: 72, ci_percentage_upper: 91, is_cold_start: false, total_feedback: 28 },
+      { category: 'best-practice', weight: 0.75, percentage: 75, alpha: 18, beta: 6, accept_count: 18, dismiss_count: 6, not_relevant_count: 0, suppressed: false, color_token: 'accent', ci_percentage_lower: 63, ci_percentage_upper: 86, is_cold_start: false, total_feedback: 24 },
+      { category: 'security', weight: 0.50, percentage: 50, alpha: 10, beta: 10, accept_count: 10, dismiss_count: 10, not_relevant_count: 0, suppressed: false, color_token: 'muted', ci_percentage_lower: 35, ci_percentage_upper: 65, is_cold_start: false, total_feedback: 20 },
+      { category: 'complexity', weight: 0.38, percentage: 38, alpha: 8, beta: 13, accept_count: 8, dismiss_count: 13, not_relevant_count: 1, suppressed: false, color_token: 'dark-muted', ci_percentage_lower: 24, ci_percentage_upper: 51, is_cold_start: false, total_feedback: 22 }
     ],
     history: [
       { round_number: 1, acceptance_rate: 38, total_flags: 20, accepted_flags: 8, dismissed_flags: 12, created_at: '' },
@@ -117,7 +123,9 @@ const GLOBAL_STATE: Record<string, ServerRepoState> = {
         status: 'pending',
         confidence: 0.95,
         suppressed: false,
-        repo_weight: 91
+        repo_weight: 91,
+        why_shown: 'Style weight 0.91 for this repo (90% CI: [84%-97%]), accepted 29 of 32 similar flags (91% accept rate).',
+        ci_bounds: '[84% - 97%]'
       },
       {
         id: 'flag-ds-2',
@@ -132,7 +140,9 @@ const GLOBAL_STATE: Record<string, ServerRepoState> = {
         status: 'pending',
         confidence: 0.92,
         suppressed: false,
-        repo_weight: 82
+        repo_weight: 82,
+        why_shown: 'Duplication weight 0.82 for this repo (90% CI: [72%-91%]), accepted 23 of 28 similar flags.',
+        ci_bounds: '[72% - 91%]'
       }
     ]
   },
@@ -142,11 +152,11 @@ const GLOBAL_STATE: Record<string, ServerRepoState> = {
     description: 'Newly created payment gateway integration. Cold-start baseline.',
     created_at: new Date().toISOString(),
     weights: [
-      { category: 'security', weight: 0.80, percentage: 80, alpha: 8, beta: 2, accept_count: 0, dismiss_count: 0, not_relevant_count: 0, suppressed: false, color_token: 'accent' },
-      { category: 'best-practice', weight: 0.60, percentage: 60, alpha: 6, beta: 4, accept_count: 0, dismiss_count: 0, not_relevant_count: 0, suppressed: false, color_token: 'accent' },
-      { category: 'complexity', weight: 0.50, percentage: 50, alpha: 5, beta: 5, accept_count: 0, dismiss_count: 0, not_relevant_count: 0, suppressed: false, color_token: 'primary' },
-      { category: 'duplication', weight: 0.40, percentage: 40, alpha: 4, beta: 6, accept_count: 0, dismiss_count: 0, not_relevant_count: 0, suppressed: false, color_token: 'muted' },
-      { category: 'style', weight: 0.30, percentage: 30, alpha: 3, beta: 7, accept_count: 0, dismiss_count: 0, not_relevant_count: 0, suppressed: false, color_token: 'dark-muted' }
+      { category: 'security', weight: 0.80, percentage: 80, alpha: 8, beta: 2, accept_count: 0, dismiss_count: 0, not_relevant_count: 0, suppressed: false, color_token: 'accent', ci_percentage_lower: 62, ci_percentage_upper: 94, is_cold_start: true, total_feedback: 0 },
+      { category: 'best-practice', weight: 0.60, percentage: 60, alpha: 6, beta: 4, accept_count: 0, dismiss_count: 0, not_relevant_count: 0, suppressed: false, color_token: 'accent', ci_percentage_lower: 38, ci_percentage_upper: 82, is_cold_start: true, total_feedback: 0 },
+      { category: 'complexity', weight: 0.50, percentage: 50, alpha: 5, beta: 5, accept_count: 0, dismiss_count: 0, not_relevant_count: 0, suppressed: false, color_token: 'primary', ci_percentage_lower: 24, ci_percentage_upper: 76, is_cold_start: true, total_feedback: 0 },
+      { category: 'duplication', weight: 0.40, percentage: 40, alpha: 4, beta: 6, accept_count: 0, dismiss_count: 0, not_relevant_count: 0, suppressed: false, color_token: 'muted', ci_percentage_lower: 18, ci_percentage_upper: 62, is_cold_start: true, total_feedback: 0 },
+      { category: 'style', weight: 0.30, percentage: 30, alpha: 3, beta: 7, accept_count: 0, dismiss_count: 0, not_relevant_count: 0, suppressed: false, color_token: 'dark-muted', ci_percentage_lower: 9, ci_percentage_upper: 51, is_cold_start: true, total_feedback: 0 }
     ],
     history: [
       { round_number: 1, acceptance_rate: 50, total_flags: 10, accepted_flags: 5, dismissed_flags: 5, created_at: '' }
@@ -165,7 +175,9 @@ const GLOBAL_STATE: Record<string, ServerRepoState> = {
         status: 'pending',
         confidence: 0.98,
         suppressed: false,
-        repo_weight: 80
+        repo_weight: 80,
+        why_shown: 'Critical override: Cold-start repo, but critical security defect is prioritized immediately.',
+        ci_bounds: '[62% - 94%]'
       }
     ]
   }

@@ -9,6 +9,12 @@ export interface CategoryWeight {
   not_relevant_count: number;
   suppressed: boolean;
   color_token: string;
+  ci_lower?: number;
+  ci_upper?: number;
+  ci_percentage_lower?: number;
+  ci_percentage_upper?: number;
+  is_cold_start?: boolean;
+  total_feedback?: number;
 }
 
 export interface HistoryPoint {
@@ -35,6 +41,10 @@ export interface FlagItem {
   confidence: number;
   suppressed: boolean;
   repo_weight?: number;
+  why_shown?: string;
+  ci_bounds?: string;
+  github_comment_id?: string;
+  github_pr_id?: string;
   created_at?: string;
 }
 
@@ -49,6 +59,8 @@ export interface RepoSummary {
   top_category: string;
   top_category_weight: number;
   weights: CategoryWeight[];
+  is_cold_start?: boolean;
+  total_reviews_count?: number;
 }
 
 export interface RepoDetail extends RepoSummary {
@@ -65,6 +77,7 @@ export interface ActionResponse {
   updated_percentage: number;
   repo_acceptance_rate: number;
   taste_explanation: string;
+  why_shown?: string;
   weights: CategoryWeight[];
 }
 
@@ -75,6 +88,7 @@ export interface TasteExplanation {
   priorities: string[];
   suppressed: string[];
   confidence_level: string;
+  is_cold_start?: boolean;
   category_breakdown: Array<{
     category: string;
     percentage: number;
@@ -82,6 +96,55 @@ export interface TasteExplanation {
     accepts: number;
     dismisses: number;
     is_suppressed: boolean;
+    ci_lower?: number;
+    ci_upper?: number;
+    ci_bounds?: [number, number];
+    is_cold_start?: boolean;
   }>;
   recommendations: string[];
 }
+
+export interface BenchmarkRoundResult {
+  round_number: number;
+  round_title: string;
+  total_flags: number;
+  learned_shown: number;
+  learned_accepted: number;
+  learned_dismissed: number;
+  learned_precision: number;
+  learned_acceptance_rate: number;
+  learned_fpr: number;
+  baseline_shown: number;
+  baseline_accepted: number;
+  baseline_dismissed: number;
+  baseline_precision: number;
+  baseline_acceptance_rate: number;
+  baseline_fpr: number;
+}
+
+export interface BenchmarkSummaryResponse {
+  repo_name: string;
+  scenario_name: string;
+  total_rounds: number;
+  total_flags_evaluated: number;
+  learned_final_precision: number;
+  baseline_final_precision: number;
+  precision_gain: number;
+  learned_final_fpr: number;
+  baseline_final_fpr: number;
+  noise_reduction_pct: number;
+  rounds: BenchmarkRoundResult[];
+  category_weights_progression: Record<string, number[]>;
+}
+
+export interface GitHubEventItem {
+  id: string;
+  repo_id: string;
+  event_type: string;
+  action?: string;
+  pr_number?: number;
+  summary: string;
+  payload?: string;
+  created_at: string;
+}
+

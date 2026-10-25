@@ -10,7 +10,23 @@ from app.database import (
     insert_flags,
     create_round
 )
-from app.learning import calculate_weight
+from app.learning import (
+    calculate_weight,
+    calculate_credible_interval,
+    is_cold_start_category,
+    generate_why_shown_explanation
+)
+
+
+def seed_weight(repo_id: str, category: str, alpha: float, beta: float, accepts: int, dismisses: int, not_relevant: int = 0):
+    w, pct = calculate_weight(alpha, beta)
+    ci_l, ci_u, ci_lp, ci_up = calculate_credible_interval(alpha, beta)
+    is_cold = is_cold_start_category(accepts, dismisses, not_relevant)
+    set_category_weight(
+        repo_id, category, w, pct, alpha, beta, accepts, dismisses, not_relevant,
+        ci_lower=ci_l, ci_upper=ci_u, ci_percentage_lower=ci_lp, ci_percentage_upper=ci_up,
+        is_cold_start=is_cold
+    )
 
 
 def seed_database_if_empty():
@@ -31,11 +47,11 @@ def seed_database_if_empty():
 
     # Category Weights matching design.html:
     # Security: 88%, Complexity: 64%, Duplication: 41%, Style: 22%, Best-Practice: 58%
-    set_category_weight(r1_id, "security", 0.88, 88, alpha=22.0, beta=3.0, accept_count=22, dismiss_count=3, not_relevant_count=0)
-    set_category_weight(r1_id, "complexity", 0.64, 64, alpha=16.0, beta=9.0, accept_count=16, dismiss_count=9, not_relevant_count=0)
-    set_category_weight(r1_id, "best-practice", 0.58, 58, alpha=14.0, beta=10.0, accept_count=14, dismiss_count=10, not_relevant_count=0)
-    set_category_weight(r1_id, "duplication", 0.41, 41, alpha=9.0, beta=13.0, accept_count=9, dismiss_count=13, not_relevant_count=1)
-    set_category_weight(r1_id, "style", 0.22, 22, alpha=4.0, beta=14.0, accept_count=4, dismiss_count=14, not_relevant_count=2)
+    seed_weight(r1_id, "security", 22.0, 3.0, 22, 3, 0)
+    seed_weight(r1_id, "complexity", 16.0, 9.0, 16, 9, 0)
+    seed_weight(r1_id, "best-practice", 14.0, 10.0, 14, 10, 0)
+    seed_weight(r1_id, "duplication", 9.0, 13.0, 9, 13, 1)
+    seed_weight(r1_id, "style", 4.0, 14.0, 4, 14, 2)
 
     # Historical rounds showing upward learning curve: 42% -> 78%
     history_api = [
@@ -67,7 +83,8 @@ def seed_database_if_empty():
             "proposed_fix": "import os\nSECRET_KEY = os.environ.get('APP_SESSION_SECRET') or secrets.token_hex(32)",
             "status": "pending",
             "confidence": 0.99,
-            "suppressed": False
+            "suppressed": False,
+            "why_shown": "Critical override: Security weight 0.88 for this repo (90% CI: [81%-94%]), accepted 22 of 25 similar flags."
         },
         {
             "id": "flag-api-2",
@@ -82,7 +99,8 @@ def seed_database_if_empty():
             "proposed_fix": "if is_authenticated and not user.is_suspended:\n    return True",
             "status": "pending",
             "confidence": 0.94,
-            "suppressed": False
+            "suppressed": False,
+            "why_shown": "Complexity weight 0.64 for this repo (90% CI: [53%-74%]), accepted 16 of 25 similar flags (64% accept rate)."
         },
         {
             "id": "flag-api-3",
@@ -97,7 +115,8 @@ def seed_database_if_empty():
             "proposed_fix": "def validate_route_payload(payload: dict) -> bool:",
             "status": "pending",
             "confidence": 0.88,
-            "suppressed": False
+            "suppressed": False,
+            "why_shown": "Style weight 0.22 for this repo (90% CI: [12%-32%]), 14 dismissals vs 4 accepts. Shown in queue for calibration."
         },
         {
             "id": "flag-api-4",
@@ -112,7 +131,8 @@ def seed_database_if_empty():
             "proposed_fix": "async with httpx.AsyncClient() as client:\n    response = await client.get(upstream_url)",
             "status": "pending",
             "confidence": 0.91,
-            "suppressed": False
+            "suppressed": False,
+            "why_shown": "Best-practice weight 0.58 for this repo (90% CI: [47%-68%]), accepted 14 of 24 similar flags."
         }
     ]
     insert_flags(flags_api)
@@ -125,11 +145,11 @@ def seed_database_if_empty():
 
     # Category Weights inverted profile:
     # Style: 91%, Duplication: 82%, Best-Practice: 75%, Complexity: 38%, Security: 50%
-    set_category_weight(r2_id, "style", 0.91, 91, alpha=29.0, beta=3.0, accept_count=29, dismiss_count=3, not_relevant_count=0)
-    set_category_weight(r2_id, "duplication", 0.82, 82, alpha=23.0, beta=5.0, accept_count=23, dismiss_count=5, not_relevant_count=0)
-    set_category_weight(r2_id, "best-practice", 0.75, 75, alpha=18.0, beta=6.0, accept_count=18, dismiss_count=6, not_relevant_count=0)
-    set_category_weight(r2_id, "security", 0.50, 50, alpha=10.0, beta=10.0, accept_count=10, dismiss_count=10, not_relevant_count=0)
-    set_category_weight(r2_id, "complexity", 0.38, 38, alpha=8.0, beta=13.0, accept_count=8, dismiss_count=13, not_relevant_count=1)
+    seed_weight(r2_id, "style", 29.0, 3.0, 29, 3, 0)
+    seed_weight(r2_id, "duplication", 23.0, 5.0, 23, 5, 0)
+    seed_weight(r2_id, "best-practice", 18.0, 6.0, 18, 6, 0)
+    seed_weight(r2_id, "security", 10.0, 10.0, 10, 10, 0)
+    seed_weight(r2_id, "complexity", 8.0, 13.0, 8, 13, 1)
 
     # Historical rounds showing upward learning curve: 38% -> 86%
     history_ds = [
@@ -159,7 +179,8 @@ def seed_database_if_empty():
             "proposed_fix": "className=\"bg-primary text-black font-semibold px-4 py-2 rounded-lg\"",
             "status": "pending",
             "confidence": 0.95,
-            "suppressed": False
+            "suppressed": False,
+            "why_shown": "Style weight 0.91 for this repo (90% CI: [84%-97%]), accepted 29 of 32 similar flags (91% accept rate)."
         },
         {
             "id": "flag-ds-2",
@@ -174,7 +195,8 @@ def seed_database_if_empty():
             "proposed_fix": "export { BREAKPOINTS } from '@sentry-ui/primitives';",
             "status": "pending",
             "confidence": 0.92,
-            "suppressed": False
+            "suppressed": False,
+            "why_shown": "Duplication weight 0.82 for this repo (90% CI: [72%-91%]), accepted 23 of 28 similar flags."
         },
         {
             "id": "flag-ds-3",
@@ -189,7 +211,8 @@ def seed_database_if_empty():
             "proposed_fix": "<div role=\"dialog\" aria-modal=\"true\" aria-labelledby=\"modal-title\">",
             "status": "pending",
             "confidence": 0.89,
-            "suppressed": False
+            "suppressed": False,
+            "why_shown": "Best-practice weight 0.75 for this repo (90% CI: [63%-86%]), accepted 18 of 24 similar flags."
         }
     ]
     insert_flags(flags_ds)
@@ -201,11 +224,11 @@ def seed_database_if_empty():
     r3_id = r3["id"]
 
     # Cold start baseline weights
-    set_category_weight(r3_id, "security", 0.80, 80, alpha=8.0, beta=2.0, accept_count=0, dismiss_count=0, not_relevant_count=0)
-    set_category_weight(r3_id, "best-practice", 0.60, 60, alpha=6.0, beta=4.0, accept_count=0, dismiss_count=0, not_relevant_count=0)
-    set_category_weight(r3_id, "complexity", 0.50, 50, alpha=5.0, beta=5.0, accept_count=0, dismiss_count=0, not_relevant_count=0)
-    set_category_weight(r3_id, "duplication", 0.40, 40, alpha=4.0, beta=6.0, accept_count=0, dismiss_count=0, not_relevant_count=0)
-    set_category_weight(r3_id, "style", 0.30, 30, alpha=3.0, beta=7.0, accept_count=0, dismiss_count=0, not_relevant_count=0)
+    seed_weight(r3_id, "security", 8.0, 2.0, 0, 0, 0)
+    seed_weight(r3_id, "best-practice", 6.0, 4.0, 0, 0, 0)
+    seed_weight(r3_id, "complexity", 5.0, 5.0, 0, 0, 0)
+    seed_weight(r3_id, "duplication", 4.0, 6.0, 0, 0, 0)
+    seed_weight(r3_id, "style", 3.0, 7.0, 0, 0, 0)
 
     # Baseline round 1 point
     add_history_point(r3_id, 1, 50, 10, 5, 5)
@@ -224,7 +247,8 @@ def seed_database_if_empty():
             "proposed_fix": "stripe.Webhook.construct_event(payload, sig_header, endpoint_secret)",
             "status": "pending",
             "confidence": 0.98,
-            "suppressed": False
+            "suppressed": False,
+            "why_shown": "Critical override: Cold-start repo, but critical security defect is prioritized immediately."
         },
         {
             "id": "flag-pay-2",
@@ -239,7 +263,8 @@ def seed_database_if_empty():
             "proposed_fix": "return handle_payment_intent_status(event['data']['object'])",
             "status": "pending",
             "confidence": 0.86,
-            "suppressed": False
+            "suppressed": False,
+            "why_shown": "Cold-start calibration: Complexity initialized with neutral prior (50%, 90% CI: [24%-76%])."
         }
     ]
     insert_flags(flags_payment)

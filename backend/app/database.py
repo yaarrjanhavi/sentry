@@ -36,6 +36,11 @@ def init_db():
         accept_count INTEGER DEFAULT 0,
         dismiss_count INTEGER DEFAULT 0,
         not_relevant_count INTEGER DEFAULT 0,
+        ci_lower REAL DEFAULT 0.0,
+        ci_upper REAL DEFAULT 1.0,
+        ci_percentage_lower INTEGER DEFAULT 0,
+        ci_percentage_upper INTEGER DEFAULT 100,
+        is_cold_start INTEGER DEFAULT 0,
         last_updated TEXT NOT NULL,
         FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE,
         UNIQUE(repo_id, category)
@@ -65,6 +70,9 @@ def init_db():
         status TEXT DEFAULT 'pending',
         confidence REAL DEFAULT 0.85,
         suppressed INTEGER DEFAULT 0,
+        why_shown TEXT,
+        github_comment_id TEXT,
+        github_pr_id TEXT,
         created_at TEXT NOT NULL,
         reviewed_at TEXT,
         FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE,
@@ -82,7 +90,44 @@ def init_db():
         created_at TEXT NOT NULL,
         FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS github_events (
+        id TEXT PRIMARY KEY,
+        repo_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        action TEXT,
+        pr_number INTEGER,
+        summary TEXT,
+        payload TEXT,
+        created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS flag_feedbacks (
+        id TEXT PRIMARY KEY,
+        repo_id TEXT NOT NULL,
+        flag_id TEXT NOT NULL,
+        category TEXT NOT NULL,
+        action TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
     """)
+
+    # Non-destructive migrations for existing SQLite databases
+    def add_column_if_missing(table: str, column: str, col_type: str):
+        cursor.execute(f"PRAGMA table_info({table})")
+        columns = [row[1] for row in cursor.fetchall()]
+        if column not in columns:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+
+    add_column_if_missing("category_weights", "ci_lower", "REAL DEFAULT 0.0")
+    add_column_if_missing("category_weights", "ci_upper", "REAL DEFAULT 1.0")
+    add_column_if_missing("category_weights", "ci_percentage_lower", "INTEGER DEFAULT 0")
+    add_column_if_missing("category_weights", "ci_percentage_upper", "INTEGER DEFAULT 100")
+    add_column_if_missing("category_weights", "is_cold_start", "INTEGER DEFAULT 0")
+
+    add_column_if_missing("flags", "why_shown", "TEXT")
+    add_column_if_missing("flags", "github_comment_id", "TEXT")
+    add_column_if_missing("flags", "github_pr_id", "TEXT")
 
     conn.commit()
     conn.close()
@@ -141,7 +186,12 @@ def set_category_weight(
     beta: float,
     accept_count: int,
     dismiss_count: int,
-    not_relevant_count: int
+    not_relevant_count: int,
+    ci_lower: float = 0.0,
+    ci_upper: float = 1.0,
+    ci_percentage_lower: int = 0,
+    ci_percentage_upper: int = 100,
+    is_cold_start: bool = False
 ):
     conn = get_connection()
     cursor = conn.cursor()
@@ -149,8 +199,9 @@ def set_category_weight(
     weight_id = f"{repo_id}-{category}"
     cursor.execute("""
         INSERT INTO category_weights 
-        (id, repo_id, category, weight, percentage, alpha, beta, accept_count, dismiss_count, not_relevant_count, last_updated)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, repo_id, category, weight, percentage, alpha, beta, accept_count, dismiss_count, not_relevant_count,
+         ci_lower, ci_upper, ci_percentage_lower, ci_percentage_upper, is_cold_start, last_updated)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(repo_id, category) DO UPDATE SET
             weight = excluded.weight,
             percentage = excluded.percentage,
@@ -159,10 +210,17 @@ def set_category_weight(
             accept_count = excluded.accept_count,
             dismiss_count = excluded.dismiss_count,
             not_relevant_count = excluded.not_relevant_count,
+            ci_lower = excluded.ci_lower,
+            ci_upper = excluded.ci_upper,
+            ci_percentage_lower = excluded.ci_percentage_lower,
+            ci_percentage_upper = excluded.ci_percentage_upper,
+            is_cold_start = excluded.is_cold_start,
             last_updated = excluded.last_updated
     """, (
         weight_id, repo_id, category, weight, percentage, alpha, beta,
-        accept_count, dismiss_count, not_relevant_count, now
+        accept_count, dismiss_count, not_relevant_count,
+        ci_lower, ci_upper, ci_percentage_lower, ci_percentage_upper,
+        1 if is_cold_start else 0, now
     ))
     conn.commit()
     conn.close()
@@ -240,8 +298,12 @@ def insert_flags(flags: List[Dict[str, Any]]):
     cursor = conn.cursor()
     for f in flags:
         cursor.execute("""
-            INSERT INTO flags (id, repo_id, round_id, file_path, line_number, category, severity, title, explanation, proposed_fix, status, confidence, suppressed, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO flags (
+                id, repo_id, round_id, file_path, line_number, category, severity,
+                title, explanation, proposed_fix, status, confidence, suppressed,
+                why_shown, github_comment_id, github_pr_id, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             f.get("id", str(uuid.uuid4())),
             f["repo_id"],
@@ -256,6 +318,9 @@ def insert_flags(flags: List[Dict[str, Any]]):
             f.get("status", "pending"),
             f.get("confidence", 0.85),
             1 if f.get("suppressed") else 0,
+            f.get("why_shown", ""),
+            f.get("github_comment_id"),
+            f.get("github_pr_id"),
             f.get("created_at", datetime.utcnow().isoformat())
         ))
     conn.commit()
@@ -274,3 +339,63 @@ def create_round(repo_id: str, round_number: int, diff_title: str, diff_content:
     conn.commit()
     conn.close()
     return round_id
+
+
+def record_feedback_event(repo_id: str, flag_id: str, category: str, action: str):
+    """Logs individual feedback action timestamp for time-decay modeling and audit history"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    now = datetime.utcnow().isoformat()
+    cursor.execute("""
+        INSERT INTO flag_feedbacks (id, repo_id, flag_id, category, action, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (str(uuid.uuid4()), repo_id, flag_id, category, action, now))
+    conn.commit()
+    conn.close()
+
+
+def record_github_event(repo_id: str, event_type: str, action: Optional[str], pr_number: Optional[int], summary: str, payload_json: str) -> str:
+    """Logs GitHub App / Webhook invocation"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    event_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+    cursor.execute("""
+        INSERT INTO github_events (id, repo_id, event_type, action, pr_number, summary, payload, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (event_id, repo_id, event_type, action, pr_number, summary, payload_json, now))
+    conn.commit()
+    conn.close()
+    return event_id
+
+
+def get_github_events(repo_id: Optional[str] = None, limit: int = 25) -> List[Dict[str, Any]]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    if repo_id:
+        cursor.execute("SELECT * FROM github_events WHERE repo_id = ? ORDER BY created_at DESC LIMIT ?", (repo_id, limit))
+    else:
+        cursor.execute("SELECT * FROM github_events ORDER BY created_at DESC LIMIT ?", (limit,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_flag_by_github_comment(comment_id: str) -> Optional[Dict[str, Any]]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM flags WHERE github_comment_id = ?", (str(comment_id),))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def update_flag_github_comment(flag_id: str, github_comment_id: str, github_pr_id: Optional[str] = None):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE flags SET github_comment_id = ?, github_pr_id = ? WHERE id = ?
+    """, (str(github_comment_id), str(github_pr_id) if github_pr_id else None, flag_id))
+    conn.commit()
+    conn.close()
+
