@@ -8,6 +8,8 @@ interface HeaderProps {
   activeRepoId: string;
   onOpenExplainTaste: () => void;
   onOpenGitHubModal?: () => void;
+  onOpenOnboarding?: () => void;
+  onOpenCompare?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -15,7 +17,9 @@ export const Header: React.FC<HeaderProps> = ({
   setCurrentTab,
   activeRepoId,
   onOpenExplainTaste,
-  onOpenGitHubModal
+  onOpenGitHubModal,
+  onOpenOnboarding,
+  onOpenCompare
 }) => {
   return (
     <header className="flex justify-between items-center px-9 py-5 border-b border-[#262626] bg-black sticky top-0 z-40 backdrop-blur-md bg-opacity-95">
@@ -32,7 +36,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      <nav className="flex items-center">
+      <nav className="flex items-center flex-wrap gap-y-2">
         {(['dashboard', 'review', 'benchmark', 'repos', 'settings'] as const).map((tab) => (
           <button
             key={tab}
@@ -45,10 +49,23 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         ))}
 
+        {onOpenCompare && (
+          <button
+            onClick={onOpenCompare}
+            className="ml-6 hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#262626] bg-[#141414] text-[#8f8f8f] hover:text-white hover:border-[#a855f7]/50 transition-all text-xs font-semibold"
+            title="Side-by-side repository comparison"
+          >
+            <svg className="w-3.5 h-3.5 text-[#a855f7]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/>
+            </svg>
+            <span>Compare</span>
+          </button>
+        )}
+
         {onOpenGitHubModal && (
           <button
             onClick={onOpenGitHubModal}
-            className="ml-6 hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#262626] bg-[#141414] text-white hover:border-[#3dff6b]/50 hover:bg-[#3dff6b]/10 transition-all text-xs font-semibold"
+            className="ml-3 hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#262626] bg-[#141414] text-white hover:border-[#3dff6b]/50 hover:bg-[#3dff6b]/10 transition-all text-xs font-semibold"
             title="Configure GitHub webhook & simulate inline review loop"
           >
             <svg className="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="currentColor">
@@ -59,18 +76,17 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         )}
 
-        <button
-          onClick={onOpenExplainTaste}
-          className="ml-3 hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#a855f7]/40 text-[#a855f7] hover:bg-[#a855f7]/10 transition-all text-xs font-semibold"
-          title="Ask the agent what it has learned about this repository"
+        {/* Recruiter / User Avatar Pill */}
+        <div 
+          onClick={onOpenOnboarding}
+          className="ml-4 flex items-center gap-2 pl-2 pr-3 py-1 bg-[#141414] hover:bg-[#1f1f1f] border border-[#262626] rounded-full cursor-pointer transition-colors"
+          title="Click to launch guided tour & demo auth"
         >
-          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M12 2a8 8 0 0 0-8 8c0 3.5 2.5 6.5 6 7.5v2.5a2 2 0 0 0 4 0v-2.5c3.5-1 6-4 6-7.5a8 8 0 0 0-8-8z"/>
-            <line x1="12" y1="9" x2="12" y2="13"/>
-            <line x1="12" y1="17" x2="12.01" y2="17"/>
-          </svg>
-          Explain Taste
-        </button>
+          <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-[#a855f7] to-[#3dff6b] flex items-center justify-center text-[10px] font-bold text-black">
+            R
+          </div>
+          <span className="text-xs font-mono text-white hidden lg:inline">Demo Recruiter</span>
+        </div>
       </nav>
     </header>
   );

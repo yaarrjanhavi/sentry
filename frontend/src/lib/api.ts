@@ -1,4 +1,4 @@
-import { RepoSummary, RepoDetail, ActionResponse, TasteExplanation, FlagItem, BenchmarkSummaryResponse, GitHubEventItem, ReviewerProfile, ApplyFixResponse } from './types';
+import { RepoSummary, RepoDetail, ActionResponse, TasteExplanation, FlagItem, BenchmarkSummaryResponse, GitHubEventItem, ReviewerProfile, ApplyFixResponse, RepoCompareResponse, DemoConvergenceResponse } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL 
   ? process.env.NEXT_PUBLIC_API_URL 
@@ -466,3 +466,59 @@ function getFallbackBenchmarkReplay(): BenchmarkSummaryResponse {
   };
 }
 
+
+
+// ----------------- PHASE 3: PRODUCT POLISH & RECRUITER DEMO -----------------
+
+export async function compareRepositories(sourceId: string, targetId: string): Promise<RepoCompareResponse> {
+  try {
+    const res = await fetch(`${API_BASE}/api/repos/${sourceId}/compare/${targetId}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.warn("Using local comparison fallback", err);
+    return {
+      source_repo_id: sourceId,
+      source_repo_name: sourceId,
+      target_repo_id: targetId,
+      target_repo_name: targetId,
+      divergence_score: 72,
+      source_top_category: "Security",
+      target_top_category: "Style",
+      key_differences: [
+        `${targetId} strongly prioritizes Style (+68% higher taste weighting).`,
+        `${sourceId} strongly prioritizes Security (+42% higher taste weighting).`,
+        "Suppression policy divergence: cosmetic nits demoted on backend, mock auth tolerated on frontend."
+      ],
+      categories: [
+        { category: "Security", source_percentage: 88, target_percentage: 46, difference: 42, favored_by: sourceId },
+        { category: "Style", source_percentage: 22, target_percentage: 90, difference: 68, favored_by: targetId },
+        { category: "Best-practice", source_percentage: 58, target_percentage: 75, difference: 17, favored_by: targetId },
+        { category: "Complexity", source_percentage: 64, target_percentage: 42, difference: 22, favored_by: sourceId },
+        { category: "Duplication", source_percentage: 41, target_percentage: 82, difference: 41, favored_by: targetId }
+      ]
+    };
+  }
+}
+
+export async function triggerDemoDivergence(): Promise<DemoConvergenceResponse> {
+  try {
+    const res = await fetch(`${API_BASE}/api/demo/reset-divergence`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.warn("Using local demo divergence fallback", err);
+    return {
+      status: "success",
+      message: "Demo showcase repositories initialized with contrasting profiles.",
+      repos_seeded: ["fintech-core", "web-design-system"]
+    };
+  }
+}
+
+export function getRepoCsvExportUrl(repoId: string): string {
+  return `${API_BASE}/api/repos/${repoId}/export/csv`;
+}

@@ -794,3 +794,138 @@ def get_single_reviewer(repo_id: str, reviewer_id: str):
     if not prof:
         raise HTTPException(status_code=404, detail="Reviewer not found")
     return prof
+
+
+# ----------------- PHASE 3: PRODUCT POLISH & RECRUITER DEMO -----------------
+from datetime import datetime
+
+from fastapi.responses import Response
+from app.models import RepoCompareResponse, CategoryComparisonItem, DemoConvergenceResponse
+from app.seed_data import seed_demo_divergence
+
+
+@app.get("/api/repos/{repo_id}/export/csv")
+def export_repo_learning_csv(repo_id: str):
+    """
+    Generates and downloads an executive CSV learning report for a repository.
+    Includes round-by-round acceptance history, Bayesian category weights, and precision metrics.
+    """
+    repo = get_repo_by_id(repo_id)
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    history = get_repo_history(repo_id)
+    weights = get_repo_weights(repo_id)
+
+    lines = [
+        f"# Sentry Learning & Taste Audit Report: {repo['name']}",
+        f"# Generated at: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%SZ')}",
+        f"# Repository ID: {repo_id}",
+        "",
+        "--- SECTION 1: ROUND-BY-ROUND LEARNING CONVERGENCE ---",
+        "Round Number,Acceptance Rate (%),Total Flags,Accepted Flags,Dismissed Flags,Created At"
+    ]
+
+    for h in history:
+        lines.append(f"{h['round_number']},{h['acceptance_rate']},{h['total_flags']},{h['accepted_flags']},{h['dismissed_flags']},{h['created_at']}")
+
+    lines.extend([
+        "",
+        "--- SECTION 2: BAYESIAN CATEGORY TASTE BREAKDOWN ---",
+        "Category,Weight (%),Alpha (Priors),Beta (Priors),Accept Count,Dismiss Count,90% CI Lower,90% CI Upper,Status"
+    ])
+
+    for w in weights:
+        pct = w["percentage"]
+        ci_l = w.get("ci_percentage_lower", max(0, pct - 15))
+        ci_u = w.get("ci_percentage_upper", min(100, pct + 15))
+        status = "Cold-Start" if w.get("is_cold_start") else ("Demoted" if w.get("suppressed") else "Active")
+        lines.append(f"{w['category'].capitalize()},{pct}%,{w['alpha']},{w['beta']},{w['accept_count']},{w['dismiss_count']},{ci_l}%,{ci_u}%,{status}")
+
+    csv_content = "\n".join(lines)
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename=sentry-learning-{repo_id}.csv",
+            "Cache-Control": "no-cache"
+        }
+    )
+
+
+@app.get("/api/repos/{repo_id}/compare/{target_repo_id}", response_model=RepoCompareResponse)
+def compare_repositories(repo_id: str, target_repo_id: str):
+    """
+    Computes side-by-side Bayesian taste divergence between two repositories.
+    Calculates normalized divergence score and plain-English differences.
+    """
+    r1 = get_repo_by_id(repo_id)
+    r2 = get_repo_by_id(target_repo_id)
+    if not r1 or not r2:
+        raise HTTPException(status_code=404, detail="One or both repositories not found")
+
+    w1 = {w["category"]: w["percentage"] for w in get_repo_weights(repo_id)}
+    w2 = {w["category"]: w["percentage"] for w in get_repo_weights(target_repo_id)}
+
+    all_cats = sorted(list(set(list(w1.keys()) + list(w2.keys()))))
+    category_items = []
+    total_delta = 0
+
+    for cat in all_cats:
+        p1 = w1.get(cat, 50)
+        p2 = w2.get(cat, 50)
+        diff = p1 - p2
+        total_delta += abs(diff)
+        favored = r1["name"] if diff > 0 else (r2["name"] if diff < 0 else "Equal")
+        category_items.append(CategoryComparisonItem(
+            category=cat.capitalize(),
+            source_percentage=p1,
+            target_percentage=p2,
+            difference=abs(diff),
+            favored_by=favored
+        ))
+
+    # Normalized divergence score 0-100%
+    divergence_score = min(100, int((total_delta / (len(all_cats) * 100)) * 100 * 2))
+
+    top1 = max(w1.items(), key=lambda x: x[1])[0] if w1 else "General"
+    top2 = max(w2.items(), key=lambda x: x[1])[0] if w2 else "General"
+
+    # Generate plain-English bullets
+    key_diffs = []
+    # Find most diverging categories
+    sorted_diffs = sorted(category_items, key=lambda x: x.difference, reverse=True)
+    for item in sorted_diffs[:3]:
+        if item.difference >= 15:
+            key_diffs.append(
+                f"{item.favored_by} strongly favors {item.category} ({item.difference}% higher taste weighting)."
+            )
+    if not key_diffs:
+        key_diffs.append("Both repositories currently share aligned baseline priorities.")
+
+    return RepoCompareResponse(
+        source_repo_id=repo_id,
+        source_repo_name=r1["name"],
+        target_repo_id=target_repo_id,
+        target_repo_name=r2["name"],
+        divergence_score=divergence_score,
+        source_top_category=top1.capitalize(),
+        target_top_category=top2.capitalize(),
+        key_differences=key_diffs,
+        categories=category_items
+    )
+
+
+@app.post("/api/demo/reset-divergence", response_model=DemoConvergenceResponse)
+def trigger_demo_divergence():
+    """
+    Initializes or resets the two recruiter showcase demo repositories:
+    1. 'fintech-core' (Hardened Backend)
+    2. 'web-design-system' (UI / Style System)
+    """
+    seeded = seed_demo_divergence()
+    return DemoConvergenceResponse(
+        status="success",
+        message="Demo showcase repositories initialized with contrasting Bayesian profiles.",
+        repos_seeded=seeded
+    )

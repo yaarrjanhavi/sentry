@@ -11,6 +11,8 @@ import { SettingsView } from '../components/SettingsView';
 import { BenchmarkView } from '../components/BenchmarkView';
 import { GitHubModal } from '../components/GitHubModal';
 import { ExplainTasteModal } from '../components/ExplainTasteModal';
+import { RepoCompareModal } from '../components/RepoCompareModal';
+import { OnboardingModal } from '../components/OnboardingModal';
 
 export default function SentryApp() {
   const [currentTab, setCurrentTab] = useState<'dashboard' | 'review' | 'benchmark' | 'repos' | 'settings'>('dashboard');
@@ -20,6 +22,9 @@ export default function SentryApp() {
   const [isExplainTasteOpen, setIsExplainTasteOpen] = useState<boolean>(false);
   const [explainTasteRepoId, setExplainTasteRepoId] = useState<string>('api-gateway');
   const [isGitHubModalOpen, setIsGitHubModalOpen] = useState<boolean>(false);
+  const [isCompareOpen, setIsCompareOpen] = useState<boolean>(false);
+  const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(false);
+  const [isLoadingDetail, setIsLoadingDetail] = useState<boolean>(false);
 
   // Load repos list
   const loadRepos = useCallback(async () => {
@@ -33,11 +38,14 @@ export default function SentryApp() {
 
   // Load active repo detail
   const loadActiveRepoDetail = useCallback(async (repoId: string) => {
+    setIsLoadingDetail(true);
     try {
       const detail = await fetchRepoDetail(repoId);
       setRepoDetail(detail);
     } catch (err) {
       console.error("Failed to load repo detail:", err);
+    } finally {
+      setIsLoadingDetail(false);
     }
   }, []);
 
@@ -75,6 +83,8 @@ export default function SentryApp() {
         activeRepoId={activeRepoId}
         onOpenExplainTaste={() => handleOpenExplainTaste()}
         onOpenGitHubModal={() => setIsGitHubModalOpen(true)}
+        onOpenOnboarding={() => setIsOnboardingOpen(true)}
+        onOpenCompare={() => setIsCompareOpen(true)}
       />
 
       {/* Main Content View Container */}
@@ -84,10 +94,13 @@ export default function SentryApp() {
             repoDetail={repoDetail}
             repos={repos}
             activeRepoId={activeRepoId}
+            isLoading={isLoadingDetail}
             onSelectRepo={handleSelectRepo}
             onOpenExplainTaste={() => handleOpenExplainTaste()}
             onQueueUpdated={handleQueueUpdated}
             onNavigateToReview={() => setCurrentTab('review')}
+            onOpenCompare={() => setIsCompareOpen(true)}
+            onOpenOnboarding={() => setIsOnboardingOpen(true)}
           />
         )}
 
@@ -152,6 +165,29 @@ export default function SentryApp() {
         onClose={() => setIsGitHubModalOpen(false)}
         activeRepoId={activeRepoId}
         onFeedbackSync={handleQueueUpdated}
+      />
+
+      {/* PHASE 3: Side-by-Side Repo Compare Modal */}
+      <RepoCompareModal
+        repos={repos}
+        initialSourceId={activeRepoId}
+        isOpen={isCompareOpen}
+        onClose={() => setIsCompareOpen(false)}
+        onSelectRepo={handleSelectRepo}
+      />
+
+      {/* PHASE 3: First-Run Onboarding & Demo Auth Modal */}
+      <OnboardingModal
+        isOpen={isOnboardingOpen}
+        onClose={() => setIsOnboardingOpen(false)}
+        onStartDemo={() => {
+          handleQueueUpdated();
+          handleSelectRepo('fintech-core');
+        }}
+        onOpenGitHubModal={() => {
+          setIsOnboardingOpen(false);
+          setIsGitHubModalOpen(true);
+        }}
       />
     </div>
   );

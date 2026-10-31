@@ -186,3 +186,30 @@ export interface GitHubEventItem {
   created_at: string;
 }
 
+
+
+export interface CategoryComparisonItem {
+  category: string;
+  source_percentage: number;
+  target_percentage: number;
+  difference: number;
+  favored_by: string;
+}
+
+export interface RepoCompareResponse {
+  source_repo_id: string;
+  source_repo_name: string;
+  target_repo_id: string;
+  target_repo_name: string;
+  divergence_score: number;
+  source_top_category: string;
+  target_top_category: string;
+  key_differences: string[];
+  categories: CategoryComparisonItem[];
+}
+
+export interface DemoConvergenceResponse {
+  status: string;
+  message: string;
+  repos_seeded: string[];
+}

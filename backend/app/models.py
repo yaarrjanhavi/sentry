@@ -231,3 +231,29 @@ class GitHubWebhookResponse(BaseModel):
     flags_generated: int = 0
     feedback_recorded: Optional[str] = None
     details: Optional[str] = None
+
+
+class CategoryComparisonItem(BaseModel):
+    category: str
+    source_percentage: int
+    target_percentage: int
+    difference: int
+    favored_by: str
+
+
+class RepoCompareResponse(BaseModel):
+    source_repo_id: str
+    source_repo_name: str
+    target_repo_id: str
+    target_repo_name: str
+    divergence_score: int
+    source_top_category: str
+    target_top_category: str
+    key_differences: List[str]
+    categories: List[CategoryComparisonItem]
+
+
+class DemoConvergenceResponse(BaseModel):
+    status: str
+    message: str
+    repos_seeded: List[str]

@@ -329,3 +329,139 @@ def seed_database_if_empty():
         }
     ]
     insert_flags(flags_payment)
+
+
+def seed_demo_divergence():
+    """
+    Seeds/resets two showcase demo repositories for recruiters to inspect learning divergence:
+    1. 'fintech-core': Backend payment service with 94% security focus and suppressed cosmetic style nits.
+    2. 'web-design-system': Frontend UI kit with 94% style focus, high duplication vigilance, and tolerated mock security.
+    """
+    conn = get_connection()
+    c = conn.cursor()
+    # Check if fintech-core already exists
+    c.execute("SELECT id FROM repos WHERE id = 'fintech-core'")
+    has_fintech = c.fetchone()
+    conn.close()
+
+    if not has_fintech:
+        # Create fintech-core
+        create_repo("fintech-core", "Core banking ledger & payment settlement gateway. High-security compliance profile.")
+        seed_weight("fintech-core", "security", 28.0, 2.0, 32, 2, 0)
+        seed_weight("fintech-core", "best-practice", 19.0, 3.0, 21, 3, 0)
+        seed_weight("fintech-core", "complexity", 15.0, 7.0, 15, 7, 0)
+        seed_weight("fintech-core", "duplication", 10.0, 14.0, 10, 14, 0)
+        seed_weight("fintech-core", "style", 4.0, 18.0, 4, 18, 0)
+
+        # History points showing steady learning gain
+        add_history_point("fintech-core", 1, 48, 12, 6, 6)
+        add_history_point("fintech-core", 2, 58, 15, 9, 6)
+        add_history_point("fintech-core", 3, 67, 18, 12, 6)
+        add_history_point("fintech-core", 4, 76, 22, 17, 5)
+        add_history_point("fintech-core", 5, 84, 25, 21, 4)
+        add_history_point("fintech-core", 6, 88, 28, 25, 3)
+
+        # Seed flags for fintech-core
+        flags_fintech = [
+            {
+                "id": "flag-fc-1",
+                "repo_id": "fintech-core",
+                "round_id": None,
+                "file_path": "ledger/transaction_settlement.py",
+                "line_number": 88,
+                "category": "security",
+                "severity": "critical",
+                "title": "Raw SQL concatenation in ledger transaction balance audit",
+                "explanation": "Account balance lookup formats unescaped ledger_id string into execute statement.",
+                "proposed_fix": "cursor.execute('SELECT balance FROM accounts WHERE ledger_id = %s FOR UPDATE', (ledger_id,))",
+                "diff_patch": """--- a/ledger/transaction_settlement.py\n+++ b/ledger/transaction_settlement.py\n@@ -87,2 +87,2 @@\n-    cursor.execute(f"SELECT balance FROM accounts WHERE ledger_id = '{ledger_id}' FOR UPDATE")\n+    cursor.execute("SELECT balance FROM accounts WHERE ledger_id = %s FOR UPDATE", (ledger_id,))""",
+                "language": "python",
+                "status": "pending",
+                "confidence": 0.99,
+                "suppressed": False,
+                "demoted": False,
+                "why_shown": "High priority: Security weight 93% (90% CI: [84%-98%]), accepted 32 of 34 similar flags."
+            },
+            {
+                "id": "flag-fc-2",
+                "repo_id": "fintech-core",
+                "round_id": None,
+                "file_path": "ledger/utils.py",
+                "line_number": 14,
+                "category": "style",
+                "severity": "nit",
+                "title": "Variable name length violates PEP 8 recommendation",
+                "explanation": "Short variable name 'acc_bal_tmp' could be expanded to 'account_balance_temp'.",
+                "proposed_fix": "account_balance_temp = calculate_accrual(balance)",
+                "diff_patch": """--- a/ledger/utils.py\n+++ b/ledger/utils.py\n@@ -13,2 +13,2 @@\n-    acc_bal_tmp = calculate_accrual(balance)\n+    account_balance_temp = calculate_accrual(balance)""",
+                "language": "python",
+                "status": "pending",
+                "confidence": 0.81,
+                "suppressed": True,
+                "demoted": True,
+                "suppression_reason": "Style category weight is 18% (below 28% threshold).",
+                "why_shown": "Demoted to low priority: Style weight 18% (90% CI: [7%-33%]), rejected 18 of 22 similar flags."
+            }
+        ]
+        insert_flags(flags_fintech)
+
+        # Create web-design-system
+        create_repo("web-design-system", "Unified design tokens, React primitives, and component library. High-fidelity UI profile.")
+        seed_weight("web-design-system", "style", 29.0, 2.0, 31, 2, 0)
+        seed_weight("web-design-system", "best-practice", 22.0, 3.0, 24, 3, 0)
+        seed_weight("web-design-system", "duplication", 18.0, 4.0, 19, 4, 0)
+        seed_weight("web-design-system", "complexity", 9.0, 13.0, 9, 13, 0)
+        seed_weight("web-design-system", "security", 6.0, 14.0, 6, 14, 0)
+
+        # History points
+        add_history_point("web-design-system", 1, 45, 10, 4, 6)
+        add_history_point("web-design-system", 2, 59, 14, 8, 6)
+        add_history_point("web-design-system", 3, 68, 16, 11, 5)
+        add_history_point("web-design-system", 4, 79, 21, 17, 4)
+        add_history_point("web-design-system", 5, 87, 26, 23, 3)
+
+        # Seed flags for web-design-system
+        flags_wds = [
+            {
+                "id": "flag-wds-1",
+                "repo_id": "web-design-system",
+                "round_id": None,
+                "file_path": "components/Button/Button.tsx",
+                "line_number": 42,
+                "category": "style",
+                "severity": "warning",
+                "title": "Hardcoded hex color string breaks design token theme consistency",
+                "explanation": "Found `#3DFF6B` literal. Always reference tokens from `@theme/colors`.",
+                "proposed_fix": "backgroundColor: tokens.colors.primaryGreen,",
+                "diff_patch": """--- a/components/Button/Button.tsx\n+++ b/components/Button/Button.tsx\n@@ -41,2 +41,2 @@\n-    backgroundColor: '#3DFF6B',\n+    backgroundColor: tokens.colors.primaryGreen,""",
+                "language": "typescript",
+                "status": "pending",
+                "confidence": 0.96,
+                "suppressed": False,
+                "demoted": False,
+                "why_shown": "High priority: Style weight 94% (90% CI: [84%-98%]), accepted 31 of 33 similar flags."
+            },
+            {
+                "id": "flag-wds-2",
+                "repo_id": "web-design-system",
+                "round_id": None,
+                "file_path": "stories/MockAuth.ts",
+                "line_number": 19,
+                "category": "security",
+                "severity": "nit",
+                "title": "Storybook mock auth uses hardcoded mock bearer token",
+                "explanation": "Mock token 'dev_bearer_token_123' in Storybook fixture. Acceptable for pure UI testing.",
+                "proposed_fix": "const MOCK_TOKEN = process.env.STORYBOOK_MOCK_TOKEN || 'dev-token';",
+                "diff_patch": """--- a/stories/MockAuth.ts\n+++ b/stories/MockAuth.ts\n@@ -18,2 +18,2 @@\n-const MOCK_TOKEN = 'dev_bearer_token_123';\n+const MOCK_TOKEN = process.env.STORYBOOK_MOCK_TOKEN || 'dev-token';""",
+                "language": "typescript",
+                "status": "pending",
+                "confidence": 0.75,
+                "suppressed": True,
+                "demoted": True,
+                "suppression_reason": "Security category weight is 30% for UI token repo.",
+                "why_shown": "Demoted to low priority: Security weight 30% (90% CI: [16%-46%]), rejected 14 of 20 similar flags."
+            }
+        ]
+        insert_flags(flags_wds)
+
+    return ["fintech-core", "web-design-system"]
