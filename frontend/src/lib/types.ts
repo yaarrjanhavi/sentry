@@ -15,6 +15,10 @@ export interface CategoryWeight {
   ci_percentage_upper?: number;
   is_cold_start?: boolean;
   total_feedback?: number;
+  ci_bounds?: [number, number];
+  accepts?: number;
+  dismisses?: number;
+  is_suppressed?: boolean;
 }
 
 export interface HistoryPoint {
@@ -40,6 +44,10 @@ export interface FlagItem {
   status: 'pending' | 'accepted' | 'dismissed' | 'not_relevant' | string;
   confidence: number;
   suppressed: boolean;
+  demoted?: boolean;
+  suppression_reason?: string;
+  diff_patch?: string;
+  language?: string;
   repo_weight?: number;
   why_shown?: string;
   ci_bounds?: string;
@@ -63,9 +71,35 @@ export interface RepoSummary {
   total_reviews_count?: number;
 }
 
+
+export interface ReviewerProfile {
+  id: string;
+  repo_id: string;
+  name: string;
+  role: string;
+  avatar_color?: string;
+  current_acceptance_rate: number;
+  top_category: string;
+  top_category_weight: number;
+  weights: CategoryWeight[];
+  total_reviews_count: number;
+  taste_summary?: string;
+}
+
+export interface ApplyFixResponse {
+  flag_id: string;
+  status: string;
+  branch_name: string;
+  commit_sha: string;
+  diff_patch: string;
+  file_path: string;
+  message: string;
+}
+
 export interface RepoDetail extends RepoSummary {
   history: HistoryPoint[];
   queue: FlagItem[];
+  reviewers?: ReviewerProfile[];
 }
 
 export interface ActionResponse {
@@ -79,6 +113,7 @@ export interface ActionResponse {
   taste_explanation: string;
   why_shown?: string;
   weights: CategoryWeight[];
+  reviewer_profile?: ReviewerProfile;
 }
 
 export interface TasteExplanation {
@@ -95,7 +130,10 @@ export interface TasteExplanation {
     weight: number;
     accepts: number;
     dismisses: number;
+    accept_count?: number;
+    dismiss_count?: number;
     is_suppressed: boolean;
+    suppressed?: boolean;
     ci_lower?: number;
     ci_upper?: number;
     ci_bounds?: [number, number];

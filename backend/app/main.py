@@ -23,7 +23,13 @@ from app.database import (
     create_round,
     record_feedback_event,
     record_github_event,
-    get_github_events
+    get_github_events,
+    get_repo_reviewers,
+    get_reviewer_by_id,
+    create_reviewer,
+    get_reviewer_weights,
+    set_reviewer_weight,
+    apply_fix_flag
 )
 from app.learning import (
     COLD_START_PRIORS,
@@ -56,7 +62,10 @@ from app.models import (
     ExplainTasteResponse,
     CreateRepoRequest,
     BenchmarkSummaryResponse,
-    GitHubWebhookResponse
+    GitHubWebhookResponse,
+    ReviewerProfile,
+    ApplyFixRequest,
+    ApplyFixResponse
 )
 from app.benchmark import run_benchmark_replay
 from app.github_integration import (
@@ -89,6 +98,63 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def format_reviewer_profiles(repo_id: str) -> List[ReviewerProfile]:
+    """Formats all teammate reviewer profiles with their Bayesian weights"""
+    raw_reviewers = get_repo_reviewers(repo_id)
+    profiles = []
+    for r in raw_reviewers:
+        r_id = r["id"]
+        raw_weights = get_reviewer_weights(r_id)
+        fmt_weights = []
+        for w in raw_weights:
+            cat = w["category"]
+            w_val = w["weight"]
+            pct = w["percentage"]
+            alpha = w["alpha"]
+            beta = w["beta"]
+            ci_l, ci_u, ci_lp, ci_up = calculate_credible_interval(alpha, beta)
+            fmt_weights.append(CategoryWeight(
+                category=cat,
+                weight=w_val,
+                percentage=pct,
+                alpha=alpha,
+                beta=beta,
+                accept_count=w.get("accept_count", 0),
+                dismiss_count=w.get("dismiss_count", 0),
+                not_relevant_count=w.get("not_relevant_count", 0),
+                suppressed=(w_val < 0.28),
+                color_token=get_color_token(cat),
+                ci_lower=ci_l,
+                ci_upper=ci_u,
+                ci_percentage_lower=ci_lp,
+                ci_percentage_upper=ci_up,
+                is_cold_start=is_cold_start_category(w.get("accept_count", 0), w.get("dismiss_count", 0)),
+                total_feedback=w.get("accept_count", 0) + w.get("dismiss_count", 0)
+            ))
+        sorted_weights = sorted(fmt_weights, key=lambda x: x.weight, reverse=True)
+        top_cat = sorted_weights[0].category.capitalize() if sorted_weights else "Security"
+        top_weight = sorted_weights[0].percentage if sorted_weights else 50
+        total_acc = sum(w.accept_count for w in sorted_weights)
+        total_dsm = sum(w.dismiss_count for w in sorted_weights)
+        total_reviews = total_acc + total_dsm
+        acc_rate = int(round((total_acc / max(1, total_reviews)) * 100)) if total_reviews > 0 else 50
+
+        profiles.append(ReviewerProfile(
+            id=r_id,
+            repo_id=repo_id,
+            name=r["name"],
+            role=r["role"],
+            avatar_color=r.get("avatar_color", "#3DFF6B"),
+            current_acceptance_rate=acc_rate,
+            top_category=top_cat,
+            top_category_weight=top_weight,
+            weights=sorted_weights,
+            total_reviews_count=total_reviews,
+            taste_summary=f"{r['name']} prioritizes {top_cat} ({top_weight}%) based on {total_reviews} reviews."
+        ))
+    return profiles
 
 
 def format_weights(raw_weights: List[Dict[str, Any]]) -> List[CategoryWeight]:
@@ -248,6 +314,10 @@ def get_repository(repo_id: str):
             status=q["status"],
             confidence=q.get("confidence", 0.85),
             suppressed=bool(q.get("suppressed")),
+            demoted=bool(q.get("demoted")),
+            suppression_reason=q.get("suppression_reason"),
+            diff_patch=q.get("diff_patch"),
+            language=q.get("language") or "python",
             repo_weight=pct,
             why_shown=why,
             ci_bounds=ci_bounds,
@@ -278,6 +348,7 @@ def get_repository(repo_id: str):
         weights=fmt_weights,
         history=history,
         queue=queue,
+        reviewers=format_reviewer_profiles(r_id),
         is_cold_start=(total_feedback < 10),
         total_reviews_count=total_feedback
     )
@@ -365,7 +436,7 @@ def handle_flag_action(flag_id: str, payload: ActionRequest):
 
     # 1. Update flag status in DB and log feedback event
     updated_flag = update_flag_status(flag_id, action)
-    record_feedback_event(repo_id, flag_id, category, action)
+    record_feedback_event(repo_id, flag_id, category, action, payload.reviewer_id)
 
     # 2. Retrieve current category weight record
     weights = get_repo_weights(repo_id)
@@ -445,6 +516,42 @@ def handle_flag_action(flag_id: str, payload: ActionRequest):
         is_cold_start=is_cold
     )
 
+    # If reviewer_id is provided, update reviewer-specific Bayesian model
+    rev_profile = None
+    if payload.reviewer_id:
+        rev_weights = get_reviewer_weights(payload.reviewer_id)
+        r_rec = next((w for w in rev_weights if w["category"] == category), None)
+        if r_rec:
+            r_alpha = r_rec["alpha"]
+            r_beta = r_rec["beta"]
+            r_acc = r_rec["accept_count"]
+            r_dsm = r_rec["dismiss_count"]
+            r_nr = r_rec["not_relevant_count"]
+        else:
+            r_alpha, r_beta = 5.0, 5.0
+            r_acc, r_dsm, r_nr = 0, 0, 0
+
+        if action == "accept":
+            r_acc += 1
+        elif action == "dismiss":
+            r_dsm += 1
+        elif action == "not_relevant":
+            r_nr += 1
+
+        new_ra, new_rb, new_rw, new_rp = update_bayesian_weight(
+            r_alpha, r_beta, action,
+            prior_alpha=5.0, prior_beta=5.0,
+            apply_decay=True,
+            decay_factor=TIME_DECAY_FACTOR
+        )
+        set_reviewer_weight(
+            payload.reviewer_id, repo_id, category,
+            new_rw, new_rp, new_ra, new_rb,
+            r_acc, r_dsm, r_nr
+        )
+        all_rev_profs = format_reviewer_profiles(repo_id)
+        rev_profile = next((p for p in all_rev_profs if p.id == payload.reviewer_id), None)
+
     return ActionResponse(
         flag_id=flag_id,
         new_status=action,
@@ -455,7 +562,8 @@ def handle_flag_action(flag_id: str, payload: ActionRequest):
         repo_acceptance_rate=new_rate,
         taste_explanation=taste["summary"],
         why_shown=why_shown,
-        weights=fmt_weights
+        weights=fmt_weights,
+        reviewer_profile=rev_profile
     )
 
 
@@ -508,6 +616,10 @@ async def review_diff(repo_id: str, payload: ReviewRequest):
             status="pending",
             confidence=f.get("confidence", 0.85),
             suppressed=bool(f.get("suppressed")),
+            demoted=bool(f.get("demoted")),
+            suppression_reason=f.get("suppression_reason"),
+            diff_patch=f.get("diff_patch"),
+            language=f.get("language") or "python",
             repo_weight=f.get("repo_weight", 50),
             why_shown=f.get("why_shown"),
             ci_bounds=f.get("ci_bounds")
@@ -648,3 +760,37 @@ def list_github_events(repo_id: Optional[str] = None, limit: int = 25):
     """
     return get_github_events(repo_id, limit)
 
+
+# ----------------- ONE-CLICK SUGGESTED FIXES & REVIEWERS (PHASE 2) -----------------
+
+@app.post("/api/flags/{flag_id}/apply-fix", response_model=ApplyFixResponse)
+def apply_suggested_fix(flag_id: str, payload: Optional[ApplyFixRequest] = None):
+    """
+    One-click Apply Fix:
+    1. Validates and marks flag as accepted.
+    2. Constructs/applies git patch into a dedicated fix branch.
+    3. Returns commit sha, branch name, and unified patch details.
+    """
+    res = apply_fix_flag(flag_id, payload.note if payload else None)
+    if not res:
+        raise HTTPException(status_code=404, detail="Flag not found")
+    return ApplyFixResponse(**res)
+
+
+@app.get("/api/repos/{repo_id}/reviewers", response_model=List[ReviewerProfile])
+def get_repository_reviewers(repo_id: str):
+    """Retrieves all teammate reviewer profiles and their personalized category weights"""
+    repo = get_repo_by_id(repo_id)
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    return format_reviewer_profiles(repo_id)
+
+
+@app.get("/api/repos/{repo_id}/reviewers/{reviewer_id}", response_model=ReviewerProfile)
+def get_single_reviewer(repo_id: str, reviewer_id: str):
+    """Retrieves an individual reviewer's learned profile"""
+    profs = format_reviewer_profiles(repo_id)
+    prof = next((p for p in profs if p.id == reviewer_id), None)
+    if not prof:
+        raise HTTPException(status_code=404, detail="Reviewer not found")
+    return prof

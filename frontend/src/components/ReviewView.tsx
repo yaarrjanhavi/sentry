@@ -1,13 +1,15 @@
 'use client';
 
 import React, { useState } from 'react';
-import { RepoSummary, FlagItem } from '../lib/types';
+import { RepoSummary, FlagItem, ReviewerProfile } from '../lib/types';
 import { SAMPLE_DIFFS } from '../lib/sampleDiffs';
 import { submitDiffReview, submitFlagAction } from '../lib/api';
+import { SuggestedFixDiff } from './SuggestedFixDiff';
 
 interface ReviewViewProps {
   repos: RepoSummary[];
   activeRepoId: string;
+  reviewers?: ReviewerProfile[];
   onSelectRepo: (id: string) => void;
   onOpenExplainTaste: () => void;
   onFeedbackGiven: () => void;
@@ -16,6 +18,7 @@ interface ReviewViewProps {
 export const ReviewView: React.FC<ReviewViewProps> = ({
   repos,
   activeRepoId,
+  reviewers = [],
   onSelectRepo,
   onOpenExplainTaste,
   onFeedbackGiven
@@ -29,7 +32,11 @@ export const ReviewView: React.FC<ReviewViewProps> = ({
   const [filterSuppressed, setFilterSuppressed] = useState<boolean>(true);
   const [activeFlagId, setActiveFlagId] = useState<string | null>(null);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
-  const [copiedFixId, setCopiedFixId] = useState<string | null>(null);
+  const [selectedReviewerId, setSelectedReviewerId] = useState<string | null>(null);
+  const [showDemotedSection, setShowDemotedSection] = useState<boolean>(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const activeReviewer = selectedReviewerId ? reviewers.find(r => r.id === selectedReviewerId) || null : null;
 
   const handleSampleChange = (sampleId: string) => {
     setSelectedSample(sampleId);
@@ -63,9 +70,14 @@ export const ReviewView: React.FC<ReviewViewProps> = ({
   const handleFlagAction = async (flagId: string, action: 'accept' | 'dismiss' | 'not_relevant') => {
     setActionInProgress(flagId);
     try {
-      const res = await submitFlagAction(flagId, action);
+      const res = await submitFlagAction(flagId, action, selectedReviewerId || undefined);
       // Update local flag state
       setFlags(prev => prev.map(f => f.id === flagId ? { ...f, status: action } : f));
+      
+      const revNote = res.reviewer_profile ? ` for ${res.reviewer_profile.name}` : '';
+      setToastMessage(`Feedback recorded${revNote}: ${res.category} weight adjusted to ${res.updated_percentage}%`);
+      setTimeout(() => setToastMessage(null), 3500);
+
       onFeedbackGiven();
     } catch (err) {
       console.error("Action error:", err);
@@ -74,10 +86,9 @@ export const ReviewView: React.FC<ReviewViewProps> = ({
     }
   };
 
-  const handleCopyFix = (flagId: string, code: string) => {
-    navigator.clipboard.writeText(code);
-    setCopiedFixId(flagId);
-    setTimeout(() => setCopiedFixId(null), 2000);
+  const handleFixApplied = (flagId: string, res: import('../lib/types').ApplyFixResponse) => {
+    setToastMessage(`Proposed patch applied to branch '${res.branch_name}'! Auto-accepting flag.`);
+    handleFlagAction(flagId, 'accept');
   };
 
   // Filter flags according to suppression toggle
@@ -85,11 +96,23 @@ export const ReviewView: React.FC<ReviewViewProps> = ({
     ? flags.filter(f => !f.suppressed)
     : flags;
 
+  // Phase 2 Severity-aware suppression: split into active flags and demoted (low priority) flags
+  const activeFlags = visibleFlags.filter(f => !f.demoted);
+  const demotedFlags = visibleFlags.filter(f => f.demoted);
+
   // Split diff into lines for viewer
   const diffLines = diffContent.split('\n');
 
   return (
     <div className="px-9 py-6 max-w-[1700px] mx-auto w-full">
+      {/* Toast Feedback */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 bg-[#1a1a1a] border border-[#3dff6b]/40 text-white px-4 py-2.5 rounded-xl shadow-[0_0_20px_rgba(61,255,107,0.2)] flex items-center gap-2 text-xs font-mono animate-rise">
+          <span className="w-2 h-2 rounded-full bg-[#3dff6b] animate-ping" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
       {/* Top Controls Bar */}
       <div className="bg-[#1a1a1a] border border-[#262626] rounded-2xl p-5 mb-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
@@ -184,6 +207,46 @@ export const ReviewView: React.FC<ReviewViewProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Phase 2: Per-Reviewer Profile Filter Bar */}
+        {reviewers.length > 0 && (
+          <div className="mt-4 pt-3.5 border-t border-[#262626] flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-mono text-[#8f8f8f] uppercase">Reviewer Perspective:</span>
+              <button
+                onClick={() => setSelectedReviewerId(null)}
+                className={`px-3 py-1 rounded-lg text-xs font-mono transition-all flex items-center gap-1.5 ${
+                  selectedReviewerId === null
+                    ? 'bg-[#3dff6b] text-black font-semibold shadow-[0_0_10px_rgba(61,255,107,0.3)]'
+                    : 'bg-black/60 text-[#8f8f8f] hover:text-white border border-[#262626]'
+                }`}
+              >
+                <span>Team Consensus</span>
+              </button>
+              {reviewers.map(r => (
+                <button
+                  key={r.id}
+                  onClick={() => setSelectedReviewerId(r.id)}
+                  className={`px-3 py-1 rounded-lg text-xs font-mono transition-all flex items-center gap-1.5 ${
+                    selectedReviewerId === r.id
+                      ? 'bg-[#a855f7] text-white font-semibold shadow-[0_0_10px_rgba(168,85,247,0.3)]'
+                      : 'bg-black/60 text-[#8f8f8f] hover:text-white border border-[#262626]'
+                  }`}
+                >
+                  <span>{r.name}</span>
+                  <span className="text-[10px] opacity-75">({r.role.split(' ')[0]})</span>
+                </button>
+              ))}
+            </div>
+
+            {activeReviewer && (
+              <div className="text-[11px] font-mono text-[#a855f7] bg-[#a855f7]/10 px-3 py-1 rounded-lg border border-[#a855f7]/25 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#a855f7] animate-pulse" />
+                <span>Active Profile: {activeReviewer.name} · Priority: {activeReviewer.top_category} ({activeReviewer.top_category_weight}%)</span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Main Review Section: GitHub-PR-style split view */}
@@ -259,7 +322,7 @@ export const ReviewView: React.FC<ReviewViewProps> = ({
 
           <div className="p-3 border-t border-[#262626] bg-[#141414] text-[11px] text-[#8f8f8f] flex justify-between items-center">
             <span>Unified Diff View</span>
-            <span>Synthesizing static AST & Bayesian priors</span>
+            <span>Language-aware AST heuristics + Bayesian priors</span>
           </div>
         </div>
 
@@ -268,10 +331,12 @@ export const ReviewView: React.FC<ReviewViewProps> = ({
           <div className="flex justify-between items-center bg-[#1a1a1a] border border-[#262626] px-4 py-3 rounded-xl">
             <div>
               <h3 className="text-xl font-bold font-teko text-white tracking-wide m-0">
-                Agent Flags ({visibleFlags.length})
+                Agent Flags ({activeFlags.length})
               </h3>
               <p className="text-[11px] text-[#8f8f8f] m-0">
-                Accept or dismiss to tune {activeRepoId}&apos;s category weights.
+                {activeReviewer 
+                  ? `Reviewing through ${activeReviewer.name}'s perspective.` 
+                  : `Accept or dismiss to tune ${activeRepoId}'s category weights.`}
               </p>
             </div>
             <button
@@ -284,8 +349,8 @@ export const ReviewView: React.FC<ReviewViewProps> = ({
 
           {/* Flags Container */}
           <div className="flex-1 overflow-y-auto space-y-3.5 pr-1">
-            {visibleFlags.length > 0 ? (
-              visibleFlags.map((flag) => {
+            {activeFlags.length > 0 ? (
+              activeFlags.map((flag) => {
                 const isActive = activeFlagId === flag.id;
                 const isActing = actionInProgress === flag.id;
 
@@ -315,13 +380,18 @@ export const ReviewView: React.FC<ReviewViewProps> = ({
                   >
                     {/* Header: Badges & Location */}
                     <div className="flex justify-between items-center mb-2">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
                         <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-mono font-bold border ${categoryColor}`}>
                           {flag.category}
                         </span>
                         <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-mono font-bold border ${severityColor}`}>
                           {flag.severity}
                         </span>
+                        {flag.language && (
+                          <span className="px-2 py-0.5 rounded text-[10px] uppercase font-mono font-bold bg-[#222] text-[#8f8f8f] border border-[#333]">
+                            {flag.language.toUpperCase()}
+                          </span>
+                        )}
                       </div>
                       <span className="text-[11px] font-mono text-[#8f8f8f]">
                         Line {flag.line_number}
@@ -353,24 +423,18 @@ export const ReviewView: React.FC<ReviewViewProps> = ({
                       </div>
                     )}
 
-                    {/* Proposed Fix Code Snippet */}
-                    {flag.proposed_fix && (
-                      <div className="mb-3 rounded-lg bg-black border border-[#262626] p-2.5 font-mono text-[11px] relative group">
-                        <div className="flex justify-between items-center text-[10px] text-[#666] mb-1">
-                          <span>Proposed Fix</span>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleCopyFix(flag.id, flag.proposed_fix || '');
-                            }}
-                            className="text-[#8f8f8f] hover:text-[#3dff6b] transition-colors"
-                          >
-                            {copiedFixId === flag.id ? 'Copied!' : 'Copy snippet'}
-                          </button>
-                        </div>
-                        <pre className="text-emerald-400 overflow-x-auto whitespace-pre-wrap">
-                          {flag.proposed_fix}
-                        </pre>
+                    {/* Phase 2: One-Click Suggested Fix Unified Diff */}
+                    {(flag.diff_patch || flag.proposed_fix) && (
+                      <div className="mb-3">
+                        <SuggestedFixDiff
+                          flagId={flag.id}
+                          filePath={flag.file_path}
+                          lineNumber={flag.line_number}
+                          proposedFix={flag.proposed_fix}
+                          diffPatch={flag.diff_patch}
+                          language={flag.language}
+                          onFixApplied={(res) => handleFixApplied(flag.id, res)}
+                        />
                       </div>
                     )}
 
@@ -414,7 +478,7 @@ export const ReviewView: React.FC<ReviewViewProps> = ({
                             }}
                             disabled={isActing}
                             className="not-relevant hover:bg-[#a855f7]/20 text-[11px] border border-[#262626] px-2 py-1 rounded-lg text-[#8f8f8f] transition-all"
-                            title="Noise for this repo context"
+                            title="Noise for this context"
                           >
                             Irrelevant
                           </button>
@@ -437,7 +501,7 @@ export const ReviewView: React.FC<ReviewViewProps> = ({
                 );
               })
             ) : (
-              <div className="h-full flex flex-col items-center justify-center text-center p-8 bg-[#1a1a1a] border border-[#262626] rounded-2xl">
+              <div className="py-12 flex flex-col items-center justify-center text-center p-8 bg-[#1a1a1a] border border-[#262626] rounded-2xl">
                 <div className="w-12 h-12 rounded-full bg-black border border-[#262626] flex items-center justify-center text-[#3dff6b] mb-3">
                   <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <polyline points="20 6 9 17 4 12"/>
@@ -455,6 +519,73 @@ export const ReviewView: React.FC<ReviewViewProps> = ({
                 >
                   Run Review Now
                 </button>
+              </div>
+            )}
+
+            {/* PHASE 2: Collapsible Low Priority / Demoted Section */}
+            {demotedFlags.length > 0 && (
+              <div className="pt-2 border-t border-[#262626]">
+                <button
+                  onClick={() => setShowDemotedSection(!showDemotedSection)}
+                  className="w-full flex items-center justify-between p-3 rounded-xl bg-[#141414] border border-[#262626] hover:border-[#383838] transition-all text-xs text-[#a0a0a0]"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-[#888] font-mono text-[10px]">
+                      {showDemotedSection ? '▼' : '▶'}
+                    </span>
+                    <span className="font-semibold text-white">
+                      Low Priority Flags ({demotedFlags.length})
+                    </span>
+                    <span className="text-[10px] bg-[#f59e0b]/10 text-[#f59e0b] px-2 py-0.5 rounded border border-[#f59e0b]/30 font-mono uppercase">
+                      Demoted by repo taste
+                    </span>
+                  </div>
+                  <span className="text-[11px] font-mono text-[#666]">
+                    Never silently dropped
+                  </span>
+                </button>
+
+                {showDemotedSection && (
+                  <div className="mt-2 space-y-2.5">
+                    {demotedFlags.map(flag => (
+                      <div
+                        key={flag.id}
+                        className="p-3 rounded-xl bg-[#141414] border border-[#222] opacity-80 hover:opacity-100 transition-opacity"
+                      >
+                        <div className="flex justify-between items-start gap-2 mb-1.5">
+                          <div>
+                            <span className="text-white text-xs font-semibold">{flag.title}</span>
+                            <span className="ml-2 text-[10px] font-mono uppercase text-[#f59e0b]">({flag.category})</span>
+                            <div className="text-[11px] text-[#777] font-mono mt-0.5">
+                              {flag.file_path} · line {flag.line_number}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              onClick={() => handleFlagAction(flag.id, 'accept')}
+                              className="accept hover:bg-[#3dff6b] hover:text-black border border-[#333] text-[#8f8f8f] rounded px-2 py-0.5 text-[11px] transition-all"
+                              title="Accept flag to revive this category over time"
+                            >
+                              Accept
+                            </button>
+                            <button
+                              onClick={() => handleFlagAction(flag.id, 'dismiss')}
+                              className="dismiss hover:bg-white/10 border border-[#333] text-[#8f8f8f] rounded px-2 py-0.5 text-[11px] transition-all"
+                            >
+                              Dismiss
+                            </button>
+                          </div>
+                        </div>
+                        <p className="text-[11px] text-[#888] mb-1">
+                          {flag.explanation}
+                        </p>
+                        <div className="text-[10px] font-mono text-[#f59e0b]/80 bg-[#f59e0b]/5 px-2 py-1 rounded border border-[#f59e0b]/20">
+                          Suppression status: {flag.suppression_reason || 'Demoted due to low historical category acceptance'}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>

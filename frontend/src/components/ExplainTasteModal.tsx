@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { TasteExplanation } from '../lib/types';
-import { fetchRepoTaste } from '../lib/api';
+import { TasteExplanation, ReviewerProfile } from '../lib/types';
+import { fetchRepoTaste, fetchRepoReviewers } from '../lib/api';
 
 interface ExplainTasteModalProps {
   repoId: string;
@@ -16,14 +16,21 @@ export const ExplainTasteModal: React.FC<ExplainTasteModalProps> = ({
   onClose
 }) => {
   const [data, setData] = useState<TasteExplanation | null>(null);
+  const [reviewers, setReviewers] = useState<ReviewerProfile[]>([]);
+  const [selectedReviewerId, setSelectedReviewerId] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
     if (isOpen) {
       setLoading(true);
-      fetchRepoTaste(repoId)
-        .then((res) => {
-          setData(res);
+      setSelectedReviewerId(null);
+      Promise.all([
+        fetchRepoTaste(repoId),
+        fetchRepoReviewers(repoId).catch(() => [] as ReviewerProfile[])
+      ])
+        .then(([tasteRes, revs]) => {
+          setData(tasteRes);
+          setReviewers(revs);
           setLoading(false);
         })
         .catch(() => setLoading(false));
@@ -31,6 +38,10 @@ export const ExplainTasteModal: React.FC<ExplainTasteModalProps> = ({
   }, [repoId, isOpen]);
 
   if (!isOpen) return null;
+
+  const activeReviewer = selectedReviewerId 
+    ? reviewers.find(r => r.id === selectedReviewerId) || null 
+    : null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
@@ -51,14 +62,16 @@ export const ExplainTasteModal: React.FC<ExplainTasteModalProps> = ({
                 <h2 className="text-xl font-bold font-teko text-white tracking-wide m-0">
                   Agent Taste Profile — {repoId}
                 </h2>
-                {data?.is_cold_start && (
+                {data?.is_cold_start && !activeReviewer && (
                   <span className="text-[10px] text-[#f59e0b] bg-[#f59e0b]/15 px-2 py-0.5 rounded border border-[#f59e0b]/30 font-mono uppercase">
                     Cold Start Prior
                   </span>
                 )}
               </div>
               <span className="text-[11px] text-[#8f8f8f] font-mono">
-                {data?.confidence_level || 'Computing Bayesian Prior'}
+                {activeReviewer 
+                  ? `Teammate Perspective: ${activeReviewer.name} (${activeReviewer.role})`
+                  : (data?.confidence_level || 'Computing Bayesian Prior')}
               </span>
             </div>
           </div>
@@ -70,13 +83,122 @@ export const ExplainTasteModal: React.FC<ExplainTasteModalProps> = ({
           </button>
         </div>
 
+        {/* Reviewer / Team Perspective Pills */}
+        {reviewers.length > 0 && (
+          <div className="px-6 py-2.5 bg-[#0e0e0e] border-b border-[#222] flex items-center gap-2 overflow-x-auto">
+            <span className="text-[10px] font-mono text-[#8f8f8f] uppercase shrink-0">Model:</span>
+            <button
+              onClick={() => setSelectedReviewerId(null)}
+              className={`px-2.5 py-1 rounded-md text-xs font-mono transition-all shrink-0 ${
+                selectedReviewerId === null
+                  ? 'bg-[#3dff6b] text-black font-semibold shadow-[0_0_8px_rgba(61,255,107,0.3)]'
+                  : 'bg-black text-[#888] hover:text-white border border-[#262626]'
+              }`}
+            >
+              Team Consensus
+            </button>
+            {reviewers.map(r => (
+              <button
+                key={r.id}
+                onClick={() => setSelectedReviewerId(r.id)}
+                className={`px-2.5 py-1 rounded-md text-xs font-mono transition-all shrink-0 ${
+                  selectedReviewerId === r.id
+                    ? 'bg-[#a855f7] text-white font-semibold shadow-[0_0_8px_rgba(168,85,247,0.3)]'
+                    : 'bg-black text-[#888] hover:text-white border border-[#262626]'
+                }`}
+              >
+                {r.name}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Content */}
-        <div className="p-6 max-h-[75vh] overflow-y-auto space-y-5">
+        <div className="p-6 max-h-[70vh] overflow-y-auto space-y-5">
           {loading ? (
             <div className="py-12 text-center text-[#8f8f8f] font-mono text-sm animate-pulse">
               Synthesizing learned taste from historical feedback...
             </div>
+          ) : activeReviewer ? (
+            /* Reviewer Specific Taste Profile */
+            <>
+              <div className="p-4 rounded-xl bg-black border border-[#262626]">
+                <div className="flex justify-between items-start mb-1">
+                  <div className="text-xs uppercase tracking-wider text-[#a855f7] font-semibold">
+                    Individual Teammate Profile
+                  </div>
+                  <div className="text-[11px] font-mono text-[#3dff6b]">
+                    {activeReviewer.current_acceptance_rate}% acceptance rate
+                  </div>
+                </div>
+                <div className="text-lg font-bold text-white font-urbanist">
+                  {activeReviewer.name} — {activeReviewer.role}
+                </div>
+                <p className="text-sm text-[#a0a0a0] mt-2 leading-relaxed">
+                  {activeReviewer.taste_summary}
+                </p>
+                <div className="mt-3 flex items-center gap-3 text-xs font-mono text-[#8f8f8f]">
+                  <span>Total Reviews: <strong className="text-white">{activeReviewer.total_reviews_count}</strong></span>
+                  <span>Primary Focus: <strong className="text-[#3dff6b]">{activeReviewer.top_category} ({activeReviewer.top_category_weight}%)</strong></span>
+                </div>
+              </div>
+
+              {/* Reviewer Category Breakdown */}
+              <div>
+                <h4 className="text-xs uppercase tracking-wider text-[#8f8f8f] font-semibold mb-2">
+                  Personal Weight Breakdown
+                </h4>
+                <div className="rounded-xl border border-[#262626] overflow-hidden">
+                  <table className="w-full text-left text-xs font-mono">
+                    <thead className="bg-[#141414] text-[#8f8f8f] border-b border-[#262626]">
+                      <tr>
+                        <th className="py-2.5 px-3">Category</th>
+                        <th className="py-2.5 px-3">Weight</th>
+                        <th className="py-2.5 px-3">Accepts</th>
+                        <th className="py-2.5 px-3">Dismissals</th>
+                        <th className="py-2.5 px-3">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#262626]">
+                      {activeReviewer.weights.map((cat) => (
+                        <tr key={cat.category} className="hover:bg-white/5 transition-colors">
+                          <td className="py-2.5 px-3 capitalize font-sans text-white font-medium">
+                            {cat.category}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className="text-[#3dff6b] font-bold">{cat.percentage}%</span>
+                            {cat.ci_bounds && (
+                              <span className="text-[#888] text-[10px] block">
+                                90% CI: [{cat.ci_bounds[0]}% - {cat.ci_bounds[1]}%]
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-[#8f8f8f]">{cat.accept_count ?? cat.accepts ?? 0}</td>
+                          <td className="py-2.5 px-3 text-[#8f8f8f]">{cat.dismiss_count ?? cat.dismisses ?? 0}</td>
+                          <td className="py-2.5 px-3">
+                            {cat.is_cold_start ? (
+                              <span className="text-[#f59e0b] bg-[#f59e0b]/10 px-1.5 py-0.5 rounded border border-[#f59e0b]/20 text-[10px]">
+                                Cold Start
+                              </span>
+                            ) : (cat.suppressed || cat.is_suppressed) ? (
+                              <span className="text-[#ef4444] bg-[#ef4444]/10 px-1.5 py-0.5 rounded border border-[#ef4444]/20 text-[10px]">
+                                Suppressed
+                              </span>
+                            ) : (
+                              <span className="text-[#3dff6b] bg-[#3dff6b]/10 px-1.5 py-0.5 rounded border border-[#3dff6b]/20 text-[10px]">
+                                Active
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
           ) : data ? (
+            /* Repo Consensus Profile */
             <>
               {/* Headline Badge */}
               <div className="p-4 rounded-xl bg-black border border-[#262626]">
@@ -114,7 +236,7 @@ export const ExplainTasteModal: React.FC<ExplainTasteModalProps> = ({
                 <div className="p-3.5 rounded-xl bg-[#141414] border border-[#262626]">
                   <div className="text-xs uppercase text-[#8f8f8f] font-semibold mb-2 flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-[#555]"></span>
-                    Noise / Suppressed
+                    Demoted / Low Priority
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {data.suppressed && data.suppressed.length > 0 ? (
@@ -124,7 +246,7 @@ export const ExplainTasteModal: React.FC<ExplainTasteModalProps> = ({
                         </span>
                       ))
                     ) : (
-                      <span className="text-xs text-[#666]">No active suppressions</span>
+                      <span className="text-xs text-[#666]">No active demotions</span>
                     )}
                   </div>
                 </div>
@@ -160,16 +282,16 @@ export const ExplainTasteModal: React.FC<ExplainTasteModalProps> = ({
                               </span>
                             )}
                           </td>
-                          <td className="py-2.5 px-3 text-[#8f8f8f]">{cat.accepts}</td>
-                          <td className="py-2.5 px-3 text-[#8f8f8f]">{cat.dismisses}</td>
+                          <td className="py-2.5 px-3 text-[#8f8f8f]">{cat.accept_count ?? cat.accepts ?? 0}</td>
+                          <td className="py-2.5 px-3 text-[#8f8f8f]">{cat.dismiss_count ?? cat.dismisses ?? 0}</td>
                           <td className="py-2.5 px-3">
                             {cat.is_cold_start ? (
                               <span className="text-[#f59e0b] bg-[#f59e0b]/10 px-1.5 py-0.5 rounded border border-[#f59e0b]/20 text-[10px]" title="Fewer than 5 feedback reviews recorded">
                                 Cold Start
                               </span>
-                            ) : cat.is_suppressed ? (
+                            ) : (cat.suppressed || cat.is_suppressed) ? (
                               <span className="text-[#ef4444] bg-[#ef4444]/10 px-1.5 py-0.5 rounded border border-[#ef4444]/20 text-[10px]">
-                                Filtered
+                                Demoted
                               </span>
                             ) : (
                               <span className="text-[#3dff6b] bg-[#3dff6b]/10 px-1.5 py-0.5 rounded border border-[#3dff6b]/20 text-[10px]">

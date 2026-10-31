@@ -8,7 +8,9 @@ from app.database import (
     set_category_weight,
     add_history_point,
     insert_flags,
-    create_round
+    create_round,
+    create_reviewer,
+    set_reviewer_weight
 )
 from app.learning import (
     calculate_weight,
@@ -17,6 +19,13 @@ from app.learning import (
     generate_why_shown_explanation
 )
 
+
+
+def seed_reviewer(repo_id: str, reviewer_id: str, name: str, role: str, avatar_color: str, weights_data: list):
+    create_reviewer(repo_id, reviewer_id, name, role, avatar_color)
+    for cat, a, b, acc, dsm in weights_data:
+        w, pct = calculate_weight(a, b)
+        set_reviewer_weight(reviewer_id, repo_id, cat, w, pct, a, b, acc, dsm, 0)
 
 def seed_weight(repo_id: str, category: str, alpha: float, beta: float, accepts: int, dismisses: int, not_relevant: int = 0):
     w, pct = calculate_weight(alpha, beta)
@@ -52,6 +61,29 @@ def seed_database_if_empty():
     seed_weight(r1_id, "best-practice", 14.0, 10.0, 14, 10, 0)
     seed_weight(r1_id, "duplication", 9.0, 13.0, 9, 13, 1)
     seed_weight(r1_id, "style", 4.0, 14.0, 4, 14, 2)
+    # Seed Reviewer Profiles for api-gateway
+    seed_reviewer(r1_id, "sarah-chen", "Sarah Chen", "Staff Security Engineer", "#A855F7", [
+        ("security", 30.0, 2.0, 30, 2),
+        ("complexity", 23.0, 5.0, 23, 5),
+        ("best-practice", 14.0, 6.0, 14, 6),
+        ("duplication", 8.0, 12.0, 8, 12),
+        ("style", 3.0, 17.0, 3, 17),
+    ])
+    seed_reviewer(r1_id, "alex-rivera", "Alex Rivera", "Frontend & API Platform", "#3DFF6B", [
+        ("style", 22.0, 4.0, 22, 4),
+        ("best-practice", 18.0, 6.0, 18, 6),
+        ("security", 14.0, 6.0, 14, 6),
+        ("complexity", 15.0, 8.0, 15, 8),
+        ("duplication", 12.0, 8.0, 12, 8),
+    ])
+    seed_reviewer(r1_id, "david-kim", "David Kim", "Infra & Reliability Lead", "#38BDF8", [
+        ("best-practice", 27.0, 3.0, 27, 3),
+        ("security", 22.0, 3.0, 22, 3),
+        ("complexity", 18.0, 6.0, 18, 6),
+        ("duplication", 11.0, 9.0, 11, 9),
+        ("style", 6.0, 14.0, 6, 14),
+    ])
+
 
     # Historical rounds showing upward learning curve: 42% -> 78%
     history_api = [
@@ -84,6 +116,9 @@ def seed_database_if_empty():
             "status": "pending",
             "confidence": 0.99,
             "suppressed": False,
+            "demoted": False,
+            "language": "python",
+            "diff_patch": "--- a/src/auth/session.py\n+++ b/src/auth/session.py\n@@ -3,1 +3,2 @@\n-SECRET_KEY = \"raw-insecure-hardcoded-secret-key-123456\"\n+import os\n+SECRET_KEY = os.environ.get('APP_SESSION_SECRET') or secrets.token_hex(32)",
             "why_shown": "Critical override: Security weight 0.88 for this repo (90% CI: [81%-94%]), accepted 22 of 25 similar flags."
         },
         {
@@ -100,6 +135,9 @@ def seed_database_if_empty():
             "status": "pending",
             "confidence": 0.94,
             "suppressed": False,
+            "demoted": False,
+            "language": "python",
+            "diff_patch": "--- a/src/utils/validate.py\n+++ b/src/utils/validate.py\n@@ -6,1 +6,2 @@\n-if is_authenticated == True and not user.is_suspended == False:\n+if is_authenticated and not user.is_suspended:\n+    return True",
             "why_shown": "Complexity weight 0.64 for this repo (90% CI: [53%-74%]), accepted 16 of 25 similar flags (64% accept rate)."
         },
         {
@@ -116,7 +154,11 @@ def seed_database_if_empty():
             "status": "pending",
             "confidence": 0.88,
             "suppressed": False,
-            "why_shown": "Style weight 0.22 for this repo (90% CI: [12%-32%]), 14 dismissals vs 4 accepts. Shown in queue for calibration."
+            "demoted": True,
+            "suppression_reason": "Category weight below 28% threshold (demoted to low-priority group)",
+            "language": "python",
+            "diff_patch": "--- a/src/utils/validate.py\n+++ b/src/utils/validate.py\n@@ -12,1 +12,1 @@\n-def fn(d):\n+def validate_route_payload(payload: dict) -> bool:",
+            "why_shown": "Demoted to low priority: Style weight 0.22 for this repo (90% CI: [12%-32%]). Non-critical flags are grouped into low priority."
         },
         {
             "id": "flag-api-4",
@@ -150,6 +192,22 @@ def seed_database_if_empty():
     seed_weight(r2_id, "best-practice", 18.0, 6.0, 18, 6, 0)
     seed_weight(r2_id, "security", 10.0, 10.0, 10, 10, 0)
     seed_weight(r2_id, "complexity", 8.0, 13.0, 8, 13, 1)
+    # Seed Reviewer Profiles for design-system
+    seed_reviewer(r2_id, "alex-rivera", "Alex Rivera", "Design System Architect", "#3DFF6B", [
+        ("style", 32.0, 2.0, 32, 2),
+        ("duplication", 26.0, 3.0, 26, 3),
+        ("best-practice", 20.0, 4.0, 20, 4),
+        ("complexity", 8.0, 12.0, 8, 12),
+        ("security", 10.0, 10.0, 10, 10),
+    ])
+    seed_reviewer(r2_id, "elena-rostova", "Elena Rostova", "Accessibility & UX Specialist", "#C084FC", [
+        ("best-practice", 28.0, 2.0, 28, 2),
+        ("style", 25.0, 4.0, 25, 4),
+        ("duplication", 18.0, 6.0, 18, 6),
+        ("complexity", 10.0, 10.0, 10, 10),
+        ("security", 8.0, 12.0, 8, 12),
+    ])
+
 
     # Historical rounds showing upward learning curve: 38% -> 86%
     history_ds = [
@@ -180,6 +238,9 @@ def seed_database_if_empty():
             "status": "pending",
             "confidence": 0.95,
             "suppressed": False,
+            "demoted": False,
+            "language": "typescript",
+            "diff_patch": "--- a/packages/ui/src/Button.tsx\n+++ b/packages/ui/src/Button.tsx\n@@ -14,1 +14,1 @@\n-className=\"bg-[#3dff6b] text-black font-semibold px-4 py-2 rounded-lg\"\n+className=\"bg-primary text-black font-semibold px-4 py-2 rounded-lg\"",
             "why_shown": "Style weight 0.91 for this repo (90% CI: [84%-97%]), accepted 29 of 32 similar flags (91% accept rate)."
         },
         {

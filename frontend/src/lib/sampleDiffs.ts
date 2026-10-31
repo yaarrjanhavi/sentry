@@ -129,5 +129,64 @@ index bb11223..cc44556 100644
 +        # Bare except handler
 +        pass
 +    return error_accumulator`
+  },
+  {
+    id: "sample-ts-react",
+    name: "PR #540: Add UserProfile & Analytics Widget (React/TypeScript)",
+    repoId: "design-system",
+    description: "Multi-language TypeScript PR containing dangerouslySetInnerHTML XSS risk, unsound any types, loose equality, and console logging.",
+    diff: `diff --git a/packages/ui/src/UserProfile.tsx b/packages/ui/src/UserProfile.tsx
+index 44aa55b..88cc99d 100644
+--- a/packages/ui/src/UserProfile.tsx
++++ b/packages/ui/src/UserProfile.tsx
+@@ -1,6 +1,18 @@
+ import React, { useState, useEffect } from 'react';
++import DOMPurify from 'dompurify';
++
++export const UserProfile = ({ user }: { user: any }) => {
++  const [bio, setBio] = useState<any>("");
++
++  // Loose equality and console logging
++  if (user.status == 'active') {
++    console.log("Rendering active user profile:", user.id);
++  }
++
++  // Unsanitized dangerouslySetInnerHTML
++  const userMarkup = user.rawBiography;
++  return (
++    <div className="profile-card">
++      <div dangerouslySetInnerHTML={{ __html: userMarkup }} />
++    </div>
++  );
++};`
+  },
+  {
+    id: "sample-js-node",
+    name: "PR #465: Node.js Express Auth & Token Dispatcher (JavaScript)",
+    repoId: "api-gateway",
+    description: "JavaScript backend PR containing dynamic eval execution, client localStorage session storage, and deeply nested Promise callbacks.",
+    diff: `diff --git a/src/middleware/authDispatcher.js b/src/middleware/authDispatcher.js
+index ee77889..ff11223 100644
+--- a/src/middleware/authDispatcher.js
++++ b/src/middleware/authDispatcher.js
+@@ -10,8 +10,18 @@ const express = require('express');
+ 
+ function dispatchAuthentication(req, res, next) {
+   // Dynamic eval execution vulnerability
+   const dynamicRule = req.headers['x-auth-rule'];
+   if (dynamicRule) {
+     eval(dynamicRule);
+   }
+ 
+   // Deeply nested Promise chaining
+   getUser(req.userId)
+     .then(user => {
+       return getPermissions(user.role).then(perms => {
+         return checkQuota(perms).then(allowed => {
+           res.json({ ok: allowed });
+         });
+       });
+     });
+ }`
   }
 ];

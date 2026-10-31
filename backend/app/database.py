@@ -108,7 +108,37 @@ def init_db():
         flag_id TEXT NOT NULL,
         category TEXT NOT NULL,
         action TEXT NOT NULL,
+        reviewer_id TEXT,
         created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS reviewers (
+        id TEXT NOT NULL,
+        repo_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL,
+        avatar_color TEXT DEFAULT '#3DFF6B',
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (id, repo_id),
+        FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS reviewer_weights (
+        id TEXT PRIMARY KEY,
+        reviewer_id TEXT NOT NULL,
+        repo_id TEXT NOT NULL,
+        category TEXT NOT NULL,
+        weight REAL NOT NULL,
+        percentage INTEGER NOT NULL,
+        alpha REAL NOT NULL,
+        beta REAL NOT NULL,
+        accept_count INTEGER DEFAULT 0,
+        dismiss_count INTEGER DEFAULT 0,
+        not_relevant_count INTEGER DEFAULT 0,
+        last_updated TEXT NOT NULL,
+        FOREIGN KEY (reviewer_id) REFERENCES reviewers(id) ON DELETE CASCADE,
+        FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE,
+        UNIQUE(reviewer_id, repo_id, category)
     );
     """)
 
@@ -128,6 +158,11 @@ def init_db():
     add_column_if_missing("flags", "why_shown", "TEXT")
     add_column_if_missing("flags", "github_comment_id", "TEXT")
     add_column_if_missing("flags", "github_pr_id", "TEXT")
+    add_column_if_missing("flags", "demoted", "INTEGER DEFAULT 0")
+    add_column_if_missing("flags", "suppression_reason", "TEXT")
+    add_column_if_missing("flags", "diff_patch", "TEXT")
+    add_column_if_missing("flags", "language", "TEXT DEFAULT 'python'")
+    add_column_if_missing("flag_feedbacks", "reviewer_id", "TEXT")
 
     conn.commit()
     conn.close()
@@ -301,9 +336,10 @@ def insert_flags(flags: List[Dict[str, Any]]):
             INSERT INTO flags (
                 id, repo_id, round_id, file_path, line_number, category, severity,
                 title, explanation, proposed_fix, status, confidence, suppressed,
+                demoted, suppression_reason, diff_patch, language,
                 why_shown, github_comment_id, github_pr_id, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             f.get("id", str(uuid.uuid4())),
             f["repo_id"],
@@ -318,6 +354,10 @@ def insert_flags(flags: List[Dict[str, Any]]):
             f.get("status", "pending"),
             f.get("confidence", 0.85),
             1 if f.get("suppressed") else 0,
+            1 if f.get("demoted") else 0,
+            f.get("suppression_reason"),
+            f.get("diff_patch"),
+            f.get("language", "python"),
             f.get("why_shown", ""),
             f.get("github_comment_id"),
             f.get("github_pr_id"),
@@ -341,15 +381,15 @@ def create_round(repo_id: str, round_number: int, diff_title: str, diff_content:
     return round_id
 
 
-def record_feedback_event(repo_id: str, flag_id: str, category: str, action: str):
+def record_feedback_event(repo_id: str, flag_id: str, category: str, action: str, reviewer_id: Optional[str] = None):
     """Logs individual feedback action timestamp for time-decay modeling and audit history"""
     conn = get_connection()
     cursor = conn.cursor()
     now = datetime.utcnow().isoformat()
     cursor.execute("""
-        INSERT INTO flag_feedbacks (id, repo_id, flag_id, category, action, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (str(uuid.uuid4()), repo_id, flag_id, category, action, now))
+        INSERT INTO flag_feedbacks (id, repo_id, flag_id, category, action, reviewer_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (str(uuid.uuid4()), repo_id, flag_id, category, action, reviewer_id, now))
     conn.commit()
     conn.close()
 
@@ -399,3 +439,129 @@ def update_flag_github_comment(flag_id: str, github_comment_id: str, github_pr_i
     conn.commit()
     conn.close()
 
+
+
+# ----------------- REVIEWER PROFILES & WEIGHTS -----------------
+
+def get_repo_reviewers(repo_id: str) -> List[Dict[str, Any]]:
+    """Retrieves all teammate reviewer profiles configured for this repo"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT * FROM reviewers WHERE repo_id = ? ORDER BY name ASC
+    """, (repo_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_reviewer_by_id(reviewer_id: str, repo_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    if repo_id:
+        cursor.execute("""
+            SELECT * FROM reviewers WHERE id = ? AND repo_id = ?
+        """, (reviewer_id, repo_id))
+    else:
+        cursor.execute("""
+            SELECT * FROM reviewers WHERE id = ? LIMIT 1
+        """, (reviewer_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def create_reviewer(repo_id: str, reviewer_id: str, name: str, role: str, avatar_color: str = "#3DFF6B") -> Dict[str, Any]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    now = datetime.utcnow().isoformat()
+    cursor.execute("""
+        INSERT OR REPLACE INTO reviewers (id, repo_id, name, role, avatar_color, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (reviewer_id, repo_id, name, role, avatar_color, now))
+    conn.commit()
+    conn.close()
+    return {"id": reviewer_id, "repo_id": repo_id, "name": name, "role": role, "avatar_color": avatar_color, "created_at": now}
+
+
+def get_reviewer_weights(reviewer_id: str, repo_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    if repo_id:
+        cursor.execute("""
+            SELECT * FROM reviewer_weights WHERE reviewer_id = ? AND repo_id = ? ORDER BY weight DESC
+        """, (reviewer_id, repo_id))
+    else:
+        cursor.execute("""
+            SELECT * FROM reviewer_weights WHERE reviewer_id = ? ORDER BY weight DESC
+        """, (reviewer_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def set_reviewer_weight(
+    reviewer_id: str,
+    repo_id: str,
+    category: str,
+    weight: float,
+    percentage: int,
+    alpha: float,
+    beta: float,
+    accept_count: int,
+    dismiss_count: int,
+    not_relevant_count: int = 0
+):
+    conn = get_connection()
+    cursor = conn.cursor()
+    now = datetime.utcnow().isoformat()
+    weight_id = f"{reviewer_id}_{repo_id}_{category}"
+    cursor.execute("""
+        INSERT INTO reviewer_weights (
+            id, reviewer_id, repo_id, category, weight, percentage,
+            alpha, beta, accept_count, dismiss_count, not_relevant_count, last_updated
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(reviewer_id, repo_id, category) DO UPDATE SET
+            weight = excluded.weight,
+            percentage = excluded.percentage,
+            alpha = excluded.alpha,
+            beta = excluded.beta,
+            accept_count = excluded.accept_count,
+            dismiss_count = excluded.dismiss_count,
+            not_relevant_count = excluded.not_relevant_count,
+            last_updated = excluded.last_updated
+    """, (
+        weight_id, reviewer_id, repo_id, category, weight, percentage,
+        alpha, beta, accept_count, dismiss_count, not_relevant_count, now
+    ))
+    conn.commit()
+    conn.close()
+
+
+def apply_fix_flag(flag_id: str, note: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Marks flag as accepted and creates virtual git branch/commit for one-click patch application"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM flags WHERE id = ?", (flag_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return None
+    flag = dict(row)
+    now = datetime.utcnow().isoformat()
+    cursor.execute("UPDATE flags SET status = 'accepted', reviewed_at = ? WHERE id = ?", (now, flag_id))
+    conn.commit()
+    conn.close()
+
+    branch_name = f"sentry/fix-{flag['category']}-{flag_id[:8]}"
+    commit_sha = f"{uuid.uuid4().hex[:7]}"
+    return {
+        "flag_id": flag_id,
+        "status": "applied",
+        "branch_name": branch_name,
+        "commit_sha": commit_sha,
+        "diff_patch": flag.get("diff_patch") or f"--- a/{flag['file_path']}\n+++ b/{flag['file_path']}\n@@ -{flag['line_number']},1 +{flag['line_number']},1 @@\n+{flag.get('proposed_fix', '')}",
+        "file_path": flag["file_path"],
+        "message": f"Successfully applied suggested fix to {flag['file_path']}:{flag['line_number']} on branch {branch_name}"
+    }

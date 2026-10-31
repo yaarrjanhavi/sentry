@@ -95,6 +95,7 @@ export default function SentryApp() {
           <ReviewView
             repos={repos}
             activeRepoId={activeRepoId}
+            reviewers={repoDetail?.reviewers || []}
             onSelectRepo={handleSelectRepo}
             onOpenExplainTaste={() => handleOpenExplainTaste()}
             onFeedbackGiven={handleQueueUpdated}

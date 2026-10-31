@@ -66,12 +66,30 @@ class FlagItem(BaseModel):
     status: str = "pending"
     confidence: float = 0.85
     suppressed: bool = False
+    demoted: bool = False
+    suppression_reason: Optional[str] = None
+    diff_patch: Optional[str] = None
+    language: Optional[str] = "python"
     repo_weight: Optional[int] = None
     why_shown: Optional[str] = None
     ci_bounds: Optional[str] = None
     github_comment_id: Optional[str] = None
     github_pr_id: Optional[str] = None
     created_at: Optional[str] = None
+
+
+class ReviewerProfile(BaseModel):
+    id: str
+    repo_id: str
+    name: str
+    role: str
+    avatar_color: str = "#3DFF6B"
+    current_acceptance_rate: int = 50
+    top_category: str = "Security"
+    top_category_weight: int = 80
+    weights: List[CategoryWeight] = []
+    total_reviews_count: int = 0
+    taste_summary: Optional[str] = None
 
 
 class RepoSummary(BaseModel):
@@ -92,11 +110,28 @@ class RepoSummary(BaseModel):
 class RepoDetail(RepoSummary):
     history: List[HistoryPoint]
     queue: List[FlagItem]
+    reviewers: List[ReviewerProfile] = []
+
+
+class ApplyFixRequest(BaseModel):
+    note: Optional[str] = None
+    create_branch: bool = True
+
+
+class ApplyFixResponse(BaseModel):
+    flag_id: str
+    status: str
+    branch_name: str
+    commit_sha: str
+    diff_patch: str
+    file_path: str
+    message: str
 
 
 class ActionRequest(BaseModel):
     action: str = Field(..., description="'accept', 'dismiss', or 'not_relevant'")
     note: Optional[str] = None
+    reviewer_id: Optional[str] = None
 
 
 class ActionResponse(BaseModel):
@@ -110,6 +145,7 @@ class ActionResponse(BaseModel):
     taste_explanation: str
     why_shown: Optional[str] = None
     weights: List[CategoryWeight]
+    reviewer_profile: Optional[ReviewerProfile] = None
 
 
 class ReviewRequest(BaseModel):
@@ -164,11 +200,13 @@ class BenchmarkRoundResult(BaseModel):
 class BenchmarkSummaryResponse(BaseModel):
     repo_name: str
     scenario_name: str
-    total_rounds: int
-    total_flags_evaluated: int
+    rounds_count: int = 10
+    total_historical_flags: int = 100
     learned_final_precision: float
     baseline_final_precision: float
     precision_gain: float
+    learned_final_acceptance_rate: float = 1.0
+    baseline_final_acceptance_rate: float = 0.5
     learned_final_fpr: float
     baseline_final_fpr: float
     noise_reduction_pct: float
@@ -193,4 +231,3 @@ class GitHubWebhookResponse(BaseModel):
     flags_generated: int = 0
     feedback_recorded: Optional[str] = None
     details: Optional[str] = None
-
