@@ -1,3 +1,4 @@
+from app.cache_and_ratelimit import analysis_cache, rate_limiter, usage_metrics
 import os
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
@@ -437,6 +438,7 @@ def handle_flag_action(flag_id: str, payload: ActionRequest):
     # 1. Update flag status in DB and log feedback event
     updated_flag = update_flag_status(flag_id, action)
     record_feedback_event(repo_id, flag_id, category, action, payload.reviewer_id)
+    usage_metrics.record_feedback()
 
     # 2. Retrieve current category weight record
     weights = get_repo_weights(repo_id)
@@ -581,6 +583,21 @@ async def review_diff(repo_id: str, payload: ReviewRequest):
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
 
+    # Rate limiting
+    allowed, retry_after = rate_limiter.check_rate_limit(repo_id)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded. Please wait {retry_after} seconds before submitting diff review.",
+            headers={"Retry-After": str(retry_after)}
+        )
+
+    # In-memory LRU Cache check
+    cached = analysis_cache.get(repo_id, payload.diff_content)
+    if cached:
+        return cached
+
+    start_time = time.time()
     parsed_lines = parse_diff(payload.diff_content)
     heuristic_flags = run_heuristic_analysis(parsed_lines)
     refined_flags = await call_llm_refinement(payload.diff_content, heuristic_flags)
@@ -627,7 +644,10 @@ async def review_diff(repo_id: str, payload: ReviewRequest):
         for f in enriched_flags
     ]
 
-    return ReviewResponse(
+    duration_ms = (time.time() - start_time) * 1000
+    usage_metrics.record_review(len(payload.diff_content.splitlines()), len(enriched_flags), duration_ms)
+
+    response = ReviewResponse(
         repo_id=repo_id,
         round_id=round_id,
         diff_title=payload.diff_title,
@@ -635,6 +655,8 @@ async def review_diff(repo_id: str, payload: ReviewRequest):
         filtered_out_count=suppressed_count,
         total_detected=len(enriched_flags)
     )
+    analysis_cache.set(repo_id, payload.diff_content, response)
+    return response
 
 
 @app.post("/api/repos/{repo_id}/reset")
@@ -929,3 +951,16 @@ def trigger_demo_divergence():
         message="Demo showcase repositories initialized with contrasting Bayesian profiles.",
         repos_seeded=seeded
     )
+
+
+@app.get("/api/system/metrics")
+def get_system_metrics():
+    """
+    Returns live system usage metrics, in-memory cache statistics, and service health.
+    """
+    return {
+        "status": "operational",
+        "system": usage_metrics.get_metrics(),
+        "cache": analysis_cache.get_stats(),
+        "architecture": "Bayesian Beta-Binomial with Exponential Time Decay"
+    }

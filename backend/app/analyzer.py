@@ -161,7 +161,7 @@ def run_js_ts_heuristic_analysis(item: Dict[str, Any]) -> List[Dict[str, Any]]:
         })
 
     # LocalStorage for session tokens
-    if re.search(r'''localStorage\.(setItem|getItem)\s*\(\s*['"](token|auth|jwt|session)['"]''', stripped, re.IGNORECASE):
+    if re.search(r'''localStorage\.(setItem|getItem)\s*\(\s*['"][A-Za-z0-9_]*(token|auth|jwt|session)[A-Za-z0-9_]*['"]''', stripped, re.IGNORECASE):
         fix = "// Store session tokens in Secure HttpOnly cookies rather than localStorage\ndocument.cookie = 'session=...; Secure; HttpOnly; SameSite=Strict';"
         flags.append({
             "category": "security",

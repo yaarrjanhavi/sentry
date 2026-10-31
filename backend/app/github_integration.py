@@ -414,3 +414,12 @@ async def handle_github_feedback_event(payload: Dict[str, Any], event_name: str)
         "updated_percentage": new_pct,
         "summary": f"Tuned {category} to {new_pct}% ({action_type})"
     }
+
+
+def generate_github_signature(payload_bytes: bytes, secret: Optional[str] = None) -> str:
+    """
+    Generates a valid HMAC-SHA256 signature string for testing and webhooks.
+    """
+    key = secret or os.environ.get("GITHUB_WEBHOOK_SECRET", "sentry-dev-secret-key-1234")
+    mac = hmac.new(key.encode("utf-8"), msg=payload_bytes, digestmod=hashlib.sha256)
+    return f"sha256={mac.hexdigest()}"
